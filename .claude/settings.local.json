@@ -17,7 +17,9 @@
       "PowerShell(docker pull *)",
       "PowerShell(docker exec super-app-nginx *)",
       "PowerShell(Get-ChildItem \"D:\\\\DISKOMINFO\\\\super-app-ecosystem-test\\\\bff\" -Force -Name | Where-Object { $_ -match '^\\\\.' })",
-      "Bash(flutter test *)"
+      "Bash(flutter test *)",
+      "Bash(dir *)",
+      "Bash(docker exec *)"
     ]
   }
 }

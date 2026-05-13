@@ -7,6 +7,12 @@ import type { KeycloakClient } from '../../lib/keycloak.js';
 import { challengeFromVerifier, generateVerifier, parsePkceMethod } from '../../lib/pkce.js';
 import type { AuthStateStore } from '../stores/authState.store.js';
 
+// OIDC-defined values per https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest
+// `none` is intentionally omitted: it implies "no UI" which only makes sense
+// when the caller already holds a session — not applicable to a fresh mobile
+// login through this BFF.
+const PromptValues = z.enum(['login', 'consent', 'select_account']);
+
 const QuerySchema = z.object({
   response_type: z.literal('code'),
   client_id: z.string().min(1),
@@ -15,6 +21,13 @@ const QuerySchema = z.object({
   code_challenge_method: z.string().default('S256'),
   state: z.string().min(1),
   scope: z.string().optional(),
+  prompt: PromptValues.optional(),
+  max_age: z.string().regex(/^\d+$/).optional(),
+  login_hint: z.string().min(1).max(255).optional(),
+  ui_locales: z
+    .string()
+    .regex(/^[A-Za-z0-9\- ]{1,64}$/)
+    .optional(),
 });
 
 export const makeAuthorizeHandler = (deps: {
@@ -70,6 +83,14 @@ export const makeAuthorizeHandler = (deps: {
       url.searchParams.set('scope', q.scope ?? deps.env.KC_SCOPES);
       url.searchParams.set('code_challenge', bffCodeChallenge);
       url.searchParams.set('code_challenge_method', 'S256');
+      // Forward OIDC UX params so the app can ask Keycloak to bypass the
+      // SSO cookie (`prompt=login`) or pre-fill a username (`login_hint`).
+      // Without this, a second login attempt silently reuses KC's cookie
+      // and never re-prompts the user.
+      if (q.prompt) url.searchParams.set('prompt', q.prompt);
+      if (q.max_age) url.searchParams.set('max_age', q.max_age);
+      if (q.login_hint) url.searchParams.set('login_hint', q.login_hint);
+      if (q.ui_locales) url.searchParams.set('ui_locales', q.ui_locales);
 
       res.setHeader('Cache-Control', 'no-store');
       res.redirect(302, url.toString());

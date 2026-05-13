@@ -284,7 +284,7 @@ cp .env.dev.example .env
 # Fill in KC_CLIENT_SECRET from Keycloak admin → Clients → super-app-bff → Credentials.
 cd bff && npm install && npm run gen:keys
 # gen:keys prints env-paste material for the workspace .env and the public
-# PEM to inline under docker-compose.yml's INTERNAL_JWT_PUBKEY_DEV_V1.
+# PEM to inline under kong/kong.yml's consumers[].jwt_secrets[].rsa_public_key.
 cd ..
 
 docker compose up -d --build
@@ -348,6 +348,7 @@ For deeper detail on any one piece, read its own README:
 - [`mobile/README.md`](mobile/README.md) — Flutter app.
 - [`docs/auth-architecture.md`](docs/auth-architecture.md) — token model, flow narratives, tradeoffs.
 - [`docs/adding-a-service.md`](docs/adding-a-service.md) — step-by-step guide for adding a new authenticated or public service behind Kong.
+- [`docs/registration-and-verification.md`](docs/registration-and-verification.md) — register, OTP email verify, NIK + phone collection, WhatsApp OTP, password reset: where each ceremony runs (Keycloak hosted page vs mobile) and why.
 
 ---
 

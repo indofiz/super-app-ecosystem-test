@@ -768,7 +768,7 @@ work:
 | S-2   | ✅ done       | `jwt` plugin pinned to `header_names: [authorization]`, cookie & query carriers disabled.       |
 | S-3   | ✅ done       | `Authorization` header cleared upstream once X-* identity headers are set.                      |
 | S-4   | ✅ done       | `claims_to_verify: [exp, nbf]` + `maximum_expiration: 600`. BFF now mints `nbf` (`setNotBefore`).|
-| S-5   | ✅ done       | PEM via `{vault://env/internal-jwt-pubkey-dev-v1}`; kid renamed `v1` → `dev-v1` as tripwire.    |
+| S-5   | ✅ done       | Dev PEM inlined in `kong.yml` under `consumers[].jwt_secrets[].rsa_public_key`; kid renamed `v1` → `dev-v1` as tripwire. (Initial implementation tried `{vault://env/internal-jwt-pubkey-dev-v1}` for deploy-agnostic config; reverted because Kong 3.x DB-less validates `consumers.jwt_secrets` at parse time, before vault refs resolve, causing `rsa_public_key: invalid key` and a startup loop. See `kong/README.md` "Why not `{vault://env/...}`?".) |
 | S-6   | ✅ done       | Global `request-size-limiting` at 256 KB.                                                       |
 | S-7   | ⏸ deferred    | `jti` denylist needs Redis-shared-with-BFF. Revisit when instant-revocation lands.              |
 | S-8   | ✅ done       | Sandbox allow-list documented as a registry in `docker-compose.yml`.                            |

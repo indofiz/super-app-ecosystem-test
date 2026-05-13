@@ -182,10 +182,16 @@ node kong/scripts/audit-kid-config.mjs
 Reads the kid configuration from all four sources (`kong/kong.yml`,
 `docker-compose.yml`, workspace `.env`, `bff/.env`) and reports any
 mismatch. The most common rotation failure is forgetting one of them —
-e.g., adding `dev-v2` to `kong.yml` but not setting
-`INTERNAL_JWT_PUBKEY_DEV_V2` in `docker-compose.yml`, which leaves Kong
-unable to resolve the new PEM at boot. Run before and after every step
-of the rotation runbook above.
+e.g., adding `dev-v2` to the BFF's `BFF_INTERNAL_JWT_PUBLIC_KEYS` but
+forgetting to append the matching `jwt_secrets` entry to `kong.yml`,
+which leaves Kong rejecting every v2-signed token at the gateway. Run
+before and after every step of the rotation runbook above.
+
+(Historical note: an earlier version of this script and runbook tracked
+`INTERNAL_JWT_PUBKEY_*` env vars in `docker-compose.yml` because the
+PEM was sourced via `{vault://env/...}`. That indirection was removed —
+see "Why not `{vault://env/...}`?" above — and the script now reports
+those kong.yml entries as `(inline pem)` in its summary.)
 
 Full automation of the rotation steps themselves is a future improvement
 — it would have to coordinate edits across multiple files and trigger
@@ -267,18 +273,36 @@ have the upstream service decode the JWT and check `roles` itself.
 
 ## Key sourcing (where the public key comes from)
 
-The committed `kong.yml` does not contain a PEM. The `jwt_secrets` block
-references an env-vault entry:
+The committed `kong.yml` inlines the dev RSA public PEM directly under
+`consumers[].jwt_secrets[].rsa_public_key`:
 
 ```yaml
 - key: dev-v1
   algorithm: RS256
-  rsa_public_key: "{vault://env/internal-jwt-pubkey-dev-v1}"
+  rsa_public_key: |
+    -----BEGIN PUBLIC KEY-----
+    ...dev public key...
+    -----END PUBLIC KEY-----
 ```
 
-Kong resolves this at start-up from the env var `INTERNAL_JWT_PUBKEY_DEV_V1`.
-In dev, the var is set inline in `docker-compose.yml` (the dev PEM is not
-secret — its matching private key is committed under `bff/keys/`).
+The dev PEM is not secret — its matching private key is committed under
+`bff/keys/` for local development.
+
+### Why not `{vault://env/...}`?
+
+An earlier iteration sourced the PEM from an env var via the env vault
+(`rsa_public_key: "{vault://env/internal-jwt-pubkey-dev-v1}"`) so the
+file would be deploy-agnostic. **It does not work** in Kong 3.x DB-less
+mode: the `consumers.jwt_secrets` entity is validated at config-parse
+time, before vault references are resolved, so the literal placeholder
+string reaches the RS256 conditional validator and fails as
+`rsa_public_key: invalid key`. `init_by_lua` aborts, the container
+restart-loops, the `kong health` healthcheck never passes, and Compose
+reports `dependency failed to start: container super-app-kong is
+unhealthy` for nginx. Inlining sidesteps the parse-time vs lazy-resolve
+ordering problem entirely. Vault references still work for *plugin*
+config fields — they're resolved on first plugin invocation, not at
+parse time.
 
 ### Promoting to non-dev environments (AUDIT S-5)
 
@@ -287,24 +311,28 @@ token whose kid doesn't match a `jwt_secrets` entry:
 
 1. **Mint a fresh keypair** in the target environment's secret manager
    (not on a developer laptop). Choose a non-dev kid, e.g. `prod-v1`.
-2. **Provision the public PEM** as `INTERNAL_JWT_PUBKEY_PROD_V1` in the
-   Kong container's runtime env (via the deploy artifact — k8s Secret,
-   AWS Secrets Manager, etc.).
-3. **Update kong.yml for that env**:
+2. **Render a prod `kong.yml` for the deploy artifact** with the prod
+   PEM inlined:
    ```yaml
    - key: prod-v1
      algorithm: RS256
-     rsa_public_key: "{vault://env/internal-jwt-pubkey-prod-v1}"
+     rsa_public_key: |
+       -----BEGIN PUBLIC KEY-----
+       ...prod public key from your secret manager...
+       -----END PUBLIC KEY-----
    ```
-   The `dev-v1` entry must not appear in a prod kong.yml.
-4. **Update BFF env**: `BFF_INTERNAL_JWT_ACTIVE_KID=prod-v1`,
+   The `dev-v1` entry must not appear in a prod kong.yml. The PEM itself
+   isn't secret (only the private half is) but treating the prod kong.yml
+   as a build artifact rather than a committed file keeps prod kids out
+   of git history.
+3. **Update BFF env**: `BFF_INTERNAL_JWT_ACTIVE_KID=prod-v1`,
    `BFF_INTERNAL_JWT_PRIVATE_KEY=...prod private...`, and add prod-v1
    to `BFF_INTERNAL_JWT_PUBLIC_KEYS`.
 
 The kid prefix is a tripwire: if you ever see `kid=dev-*` in a prod log,
 something is misconfigured and Kong should already have rejected the
-token. We rely on the prefix because the committed kong.yml is shared
-across envs — only the env-vault PEM and the kid name differ per deploy.
+token. We rely on the prefix because dev and prod kong.yml differ only
+in the inlined PEM and the kid name — the rest of the file is identical.
 
 ## Key rotation (zero-downtime)
 
@@ -312,26 +340,36 @@ The BFF and Kong each support multiple keys at once. To rotate
 `dev-v1` → `dev-v2` (or `prod-v1` → `prod-v2`):
 
 1. **Generate v2 in BFF**: `cd bff && npm run gen:keys dev-v2`. Save the
-   printed public PEM somewhere safe.
-2. **Add v2 to Kong**, leaving v1 in place:
+   printed public PEM — you'll paste it into `kong/kong.yml` next.
+2. **Add v2 to Kong**, leaving v1 in place. Append a second entry under
+   `consumers[].jwt_secrets` with the new PEM inlined:
    ```yaml
    consumers:
      - username: super-app-bff
        jwt_secrets:
-         - { key: dev-v1, algorithm: RS256, rsa_public_key: "{vault://env/internal-jwt-pubkey-dev-v1}" }
-         - { key: dev-v2, algorithm: RS256, rsa_public_key: "{vault://env/internal-jwt-pubkey-dev-v2}" }   # new
+         - key: dev-v1
+           algorithm: RS256
+           rsa_public_key: |
+             -----BEGIN PUBLIC KEY-----
+             ...v1 public key...
+             -----END PUBLIC KEY-----
+         - key: dev-v2                                      # new
+           algorithm: RS256
+           rsa_public_key: |
+             -----BEGIN PUBLIC KEY-----
+             ...v2 public key...
+             -----END PUBLIC KEY-----
    ```
-   Also add `INTERNAL_JWT_PUBKEY_DEV_V2` to Kong's environment with the
-   new PEM. Deploy Kong. Both kids verify.
+   Deploy Kong (`docker compose up -d --force-recreate kong`). Both kids
+   verify.
 3. **Cut BFF over to v2**: in BFF env, set `BFF_INTERNAL_JWT_ACTIVE_KID=dev-v2`,
    append v2 to `BFF_INTERNAL_JWT_PUBLIC_KEYS`, swap
    `BFF_INTERNAL_JWT_PRIVATE_KEY` to v2's private. Deploy. New tokens carry
    `kid=dev-v2`; v1 tokens keep verifying until they age out.
 4. **Wait** `BFF_INTERNAL_JWT_TTL_SECONDS + 1m` (default: 6 minutes). All
    v1-signed tokens have now expired.
-5. **Drop v1**: remove from BFF env's `BFF_INTERNAL_JWT_PUBLIC_KEYS`,
-   from `kong.yml`'s `jwt_secrets`, and clear `INTERNAL_JWT_PUBKEY_DEV_V1`
-   from Kong's environment. Redeploy.
+5. **Drop v1**: remove from BFF env's `BFF_INTERNAL_JWT_PUBLIC_KEYS` and
+   delete the v1 entry from `kong.yml`'s `jwt_secrets`. Redeploy.
 
 Skipping step 2 (Kong not yet aware of v2) → v2 tokens 401 at the gateway.
 Skipping step 4 → in-flight v1 tokens 401 prematurely. Fail forward, not

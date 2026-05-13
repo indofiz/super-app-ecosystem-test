@@ -319,10 +319,14 @@ BFF_INTERNAL_JWT_AUDIENCE=super-app-services
 
 ## 8. Configure `kong.yml` for the prod kid
 
-The committed `kong/kong.yml` references the **dev** kid
-(`dev-v1`) via an env-vault reference. For production, the kid must be
-`prod-v1` and Kong needs to read the matching public PEM from its
-environment.
+The committed `kong/kong.yml` ships with the **dev** kid (`dev-v1`) and
+its public PEM inlined. For production, the kid must be `prod-v1` and
+the prod public PEM must replace the dev one — Kong does not call out
+to a secret manager for `consumers.jwt_secrets`; the value is read
+straight out of `kong.yml` at startup. (Earlier revisions of this guide
+used a `{vault://env/...}` indirection here; that pattern fails Kong
+3.x's parse-time validator on the consumer credential — see
+`kong/README.md` "Why not `{vault://env/...}`?".)
 
 ### 8.1 Update `kong.yml`
 
@@ -331,44 +335,46 @@ cd ~/super-app
 nano kong/kong.yml
 ```
 
-Find the `consumers[].jwt_secrets` block (search for `dev-v1`) and replace
-the entry:
+Find the `consumers[].jwt_secrets` block (search for `dev-v1`) and
+replace the entry, inlining the prod public PEM directly:
 
 ```yaml
 # Before
 - key: dev-v1
   algorithm: RS256
-  rsa_public_key: "{vault://env/internal-jwt-pubkey-dev-v1}"
+  rsa_public_key: |
+    -----BEGIN PUBLIC KEY-----
+    ...dev public key (committed)...
+    -----END PUBLIC KEY-----
 
 # After (prod)
 - key: prod-v1
   algorithm: RS256
-  rsa_public_key: "{vault://env/internal-jwt-pubkey-prod-v1}"
+  rsa_public_key: |
+    -----BEGIN PUBLIC KEY-----
+    <paste contents of bff/keys/internal-jwt-prod-v1.public.pem>
+    -----END PUBLIC KEY-----
 ```
 
-### 8.2 Update `docker-compose.yml` Kong env
+The dev entry must not survive in the prod `kong.yml`. Treat the prod
+`kong.yml` as a deploy-time artifact: don't commit it back to the shared
+repo (it's environment-specific now).
 
-In `docker-compose.yml`, find the `kong:` service's `environment:` block
-and **replace** the dev pubkey block with the prod one. The simplest move:
+### 8.2 Confirm `docker-compose.yml` Kong env has no leftover PEM vars
 
-```yaml
-# DELETE this dev-only block (lines starting `INTERNAL_JWT_PUBKEY_DEV_V1: |`
-# through the end of the PEM).
+The current `docker-compose.yml` no longer sets any
+`INTERNAL_JWT_PUBKEY_*` env var on the `kong:` service. If you're
+upgrading from an older revision, **delete** any leftover
+`INTERNAL_JWT_PUBKEY_DEV_V1: |` (or `_PROD_V1: |`) block under
+`kong.environment:` — the PEM lives in `kong.yml` now, and a stale env
+var only confuses operators reading the file.
 
-# REPLACE with: read the prod PEM from a file the deploy user controls.
-# Easiest path: keep the prod PEM in bff/keys/ and inline it here.
-INTERNAL_JWT_PUBKEY_PROD_V1: |
-  -----BEGIN PUBLIC KEY-----
-  <paste contents of bff/keys/internal-jwt-prod-v1.public.pem>
-  -----END PUBLIC KEY-----
-```
-
-Then verify the kid configuration across all four files is consistent:
+Then verify the kid configuration across all sources is consistent:
 
 ```bash
 node kong/scripts/audit-kid-config.mjs
-# Expected: prod-v1 referenced in kong.yml, docker-compose.yml, and .env;
-# no leftover dev-v1 references.
+# Expected: kong.yml shows `prod-v1 → (inline pem)`, BFF env has
+# active=prod-v1, and no leftover dev-v1 references anywhere.
 ```
 
 Fix any divergence the script flags before proceeding.
@@ -508,15 +514,29 @@ it's a one-time fetch on first hit; retry the openssl probe in ~10 seconds.
 In the Keycloak admin console, `pangkalpinang` realm → **Clients →
 super-app-bff → Settings**:
 
-1. Under **Valid Redirect URIs**, add:
+1. Under **Valid Redirect URIs**, add the **prod** callback (the one that
+   matches `PUBLIC_BASE_URL` in this guide's `.env`):
    ```
    https://api.pangkalpinangkota.go.id/auth/callback
    ```
-   Keep any existing dev entries (e.g. `http://localhost:8080/auth/callback`)
-   if you still want to support local development against the same client.
-2. Save.
+   This is the only entry prod traffic uses. **Do not** add any
+   `10.0.2.2:8080` / `localhost:8080` entry to make prod work — those are
+   purely Android-emulator / local-dev loopbacks and have no meaning on
+   the VPS.
+2. If you want this same Keycloak client to also serve local development
+   (Android emulator pointed at the dev `docker compose` stack), keep
+   the dev callback alongside the prod one:
+   ```
+   http://10.0.2.2:8080/auth/callback
+   ```
+   (The dev stack's `.env` has `PUBLIC_BASE_URL=http://10.0.2.2:8080`, so
+   that's the URL the BFF generates when running locally. Use the iOS
+   simulator's `http://localhost:8080/auth/callback` here too if you
+   develop on iOS.) Otherwise, leave it out — splitting dev and prod
+   into separate Keycloak clients is also fine.
+3. Save.
 
-Without this, the OAuth round-trip will fail with
+Without the prod entry, the OAuth round-trip will fail with
 `invalid_redirect_uri` when a real user logs in.
 
 ---
@@ -647,15 +667,17 @@ rotation, etc.), follow the runbook in `bff/README.md` "Key rotation
 runbook" and `kong/README.md` "Key rotation (zero-downtime)". Summarized:
 
 1. `cd bff && node scripts/generate-dev-keys.mjs prod-v2`.
-2. Add `prod-v2` to `kong/kong.yml` and `INTERNAL_JWT_PUBKEY_PROD_V2`
-   in `docker-compose.yml`; redeploy Kong only:
+2. Append a `prod-v2` entry to `kong/kong.yml`'s `consumers[].jwt_secrets`
+   (leave `prod-v1` in place), with the new public PEM inlined under
+   `rsa_public_key: |`. Redeploy Kong only:
    `docker compose up -d --force-recreate kong`.
 3. Update `.env`: `BFF_INTERNAL_JWT_ACTIVE_KID=prod-v2`, swap the
    private key, append v2's public to `BFF_INTERNAL_JWT_PUBLIC_KEYS`;
    redeploy BFF: `docker compose up -d --force-recreate bff`.
 4. Wait `BFF_INTERNAL_JWT_TTL_SECONDS + 1m` (default 6 min) for v1
    tokens to age out.
-5. Remove `prod-v1` from BFF env, Kong env, and `kong.yml`; redeploy.
+5. Remove `prod-v1` from BFF env and from `kong.yml`'s `jwt_secrets`;
+   redeploy.
 
 `node kong/scripts/audit-kid-config.mjs` before and after each step
 catches the most common rotation footgun (one file out of sync).
@@ -692,7 +714,7 @@ docker compose start redis
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `docker compose up` says `dependency failed to start: kong is unhealthy` | `kong.yml` syntax error or missing `INTERNAL_JWT_PUBKEY_PROD_V1` env | `docker compose logs kong` — usually a Lua / config-parse error. Run `node kong/scripts/validate.mjs`. |
+| `docker compose up` says `dependency failed to start: kong is unhealthy` | `kong.yml` syntax error, malformed inlined PEM, or kid mismatch with the BFF | `docker compose logs kong` — usually a Lua / config-parse error. Common: a `{vault://env/...}` reference under `consumers.jwt_secrets.rsa_public_key` (validates as `invalid key` at parse time — must be inlined). Run `node kong/scripts/validate.mjs`. |
 | `/readyz` reports `keycloak: fail: ... timed out` | VPS can't reach `sso.pangkalpinangkota.go.id` | Check outbound 443. Check `dig sso.pangkalpinangkota.go.id` works inside the BFF container: `docker compose exec bff wget -qO- https://sso.pangkalpinangkota.go.id/.well-known/openid-configuration`. |
 | nginx serves an old config after editing the template | Compose image cache | `docker compose up -d --build --force-recreate nginx`. Phase-3 footgun — bare `up -d` reuses the existing image. |
 | Mobile login → "invalid_redirect_uri" from Keycloak | Forgot §12 — Keycloak doesn't have `https://<host>/auth/callback` in Valid Redirect URIs | Add it; no code change needed. |

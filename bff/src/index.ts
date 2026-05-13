@@ -91,6 +91,14 @@ const main = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info({ signal }, 'shutting down');
+    // Arm the force-exit watchdog only now — outside the shutdown path it
+    // would just kill a healthy server 25s after boot, since unref() can't
+    // detach a timer from an event loop kept alive by the HTTP server,
+    // Redis client, and OTEL exporter.
+    const force = setTimeout(() => {
+      log.fatal('shutdown force-exit timer elapsed');
+      process.exit(1);
+    }, 25_000).unref();
     try {
       server.closeIdleConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -103,16 +111,13 @@ const main = async () => {
     } catch (err) {
       log.error({ err }, 'shutdown encountered an error');
     } finally {
+      clearTimeout(force);
       await new Promise<void>((resolve) => log.flush(() => resolve()));
       process.exit(0);
     }
   };
-  const force = setTimeout(() => {
-    log.fatal('shutdown force-exit timer elapsed');
-    process.exit(1);
-  }, 25_000).unref();
-  process.on('SIGTERM', () => void shutdown('SIGTERM').finally(() => clearTimeout(force)));
-  process.on('SIGINT', () => void shutdown('SIGINT').finally(() => clearTimeout(force)));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 
   process.on('unhandledRejection', (reason) => {
     log.fatal({ err: reason }, 'unhandledRejection');

@@ -22,7 +22,7 @@ import { makeCallbackHandler } from './handlers/callback.js';
 import { makeLogoutHandler } from './handlers/logout.js';
 import { makeMeHandler } from './handlers/me.js';
 import { makeRefreshHandler } from './handlers/refresh.js';
-import { makeTokenHandler } from './handlers/token.js';
+import { makeTokenHandler, tokenUrlencoded } from './handlers/token.js';
 import type { AuthStateStore } from './stores/authState.store.js';
 import type { BffCodeStore } from './stores/bffCode.store.js';
 import type { SessionStore } from './stores/session.store.js';
@@ -53,7 +53,7 @@ export const buildAuthRouter = (deps: AuthRouterDeps): Router => {
 
   router.get('/authorize', authorizeLimiter, makeAuthorizeHandler(deps));
   router.get('/callback', makeCallbackHandler(deps));
-  router.post('/token', tokenLimiter, makeTokenHandler(deps));
+  router.post('/token', tokenLimiter, tokenUrlencoded, makeTokenHandler(deps));
   router.post('/refresh', refreshLimiter, bearerAllowExpired, makeRefreshHandler(deps));
   router.post('/logout', bearerAllowExpired, makeLogoutHandler(deps));
   router.get('/me', bearerStrict, meLimiter, makeMeHandler(deps));

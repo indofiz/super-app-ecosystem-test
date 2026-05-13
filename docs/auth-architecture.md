@@ -5,6 +5,12 @@ internal JWTs after authenticating a user against Keycloak, and Kong
 validates those internal tokens on every API call. Mobile and downstream
 services never see Keycloak tokens directly.
 
+> **Looking for register / OTP / NIK / WhatsApp verify / reset
+> password?** Those are *pre-login* ceremonies and live in their own
+> doc: [`registration-and-verification.md`](registration-and-verification.md).
+> This doc covers only the steady-state login/refresh/logout loop and
+> the internal-JWT token model.
+
 > **Diagrams.** This document is the prose version. The canonical visuals
 > live in [`diagrams/`](diagrams/) — see
 > [`flow-login.svg`](diagrams/flow-login.svg),
@@ -419,15 +425,15 @@ JWT decoding. A new service onboards in an afternoon.
 - **Logging**: never log the JWT, only `sub` and `request_id`. The BFF's pino redaction paths already cover this; do the same in services.
 
 - **Key management**:
-  - **Dev**: a committed RSA keypair under `bff/keys/` with `kid=dev-v1`. Public PEM is referenced in `kong/kong.yml` via `{vault://env/internal-jwt-pubkey-dev-v1}` and supplied to Kong by `INTERNAL_JWT_PUBKEY_DEV_V1` in `docker-compose.yml`. The matching private key is supplied to the BFF via `BFF_INTERNAL_JWT_PRIVATE_KEY` (base64 PKCS#8 PEM). The `dev-` prefix is a tripwire — a `kid=dev-*` in a prod log is a configuration alarm.
-  - **Prod**: mint a fresh keypair in the target environment (a secret manager, **not a developer laptop**) using `kid=prod-v1`. The kid name appears in four files (`bff/.env`, workspace `.env`, `kong/kong.yml`, `docker-compose.yml`); a pre-flight check `node kong/scripts/audit-kid-config.mjs` reports any divergence.
-  - The committed `kong.yml` is deploy-agnostic — only the env-vault PEM and the kid name differ per environment.
+  - **Dev**: a committed RSA keypair under `bff/keys/` with `kid=dev-v1`. Public PEM is **inlined directly** in `kong/kong.yml` under `consumers[].jwt_secrets[].rsa_public_key` (block scalar). The matching private key is supplied to the BFF via `BFF_INTERNAL_JWT_PRIVATE_KEY` (base64 PKCS#8 PEM). The `dev-` prefix is a tripwire — a `kid=dev-*` in a prod log is a configuration alarm.
+  - **Prod**: mint a fresh keypair in the target environment (a secret manager, **not a developer laptop**) using `kid=prod-v1`. The deploy artifact ships a prod `kong.yml` with the prod public PEM inlined under that kid. The kid name appears in three files (`bff/.env`, workspace `.env`, prod `kong.yml`); a pre-flight check `node kong/scripts/audit-kid-config.mjs` reports any divergence.
+  - **Why inline and not `{vault://env/...}`**: Kong 3.x DB-less validates `consumers.jwt_secrets` at config-parse time, before vault references resolve, so a `{vault://env/...}` placeholder reaches the RS256 validator as a literal string and fails as `rsa_public_key: invalid key`. Kong won't start and Compose reports `dependency failed to start: container super-app-kong is unhealthy`. Inlining sidesteps the ordering problem; the public PEM isn't a secret on either side. See `kong/README.md` "Why not `{vault://env/...}`?" for the full background.
 
 - **Rotation procedure (zero-downtime)** — illustrated in [`diagrams/internal-jwt-lifecycle.svg`](diagrams/internal-jwt-lifecycle.svg):
-  1. **Generate the new keypair.** `cd bff && npm run gen:keys dev-v2` (or `prod-v2`). Prints env-paste material for BFF and the public PEM to inline in Kong's env.
-  2. **Add the new kid at Kong, leaving the old kid in place.** Append the new entry under `consumers[].jwt_secrets` in `kong/kong.yml` and set the corresponding `INTERNAL_JWT_PUBKEY_*_V2` env var in `docker-compose.yml`. Redeploy Kong. Kong now accepts tokens signed under **either** kid.
+  1. **Generate the new keypair.** `cd bff && npm run gen:keys dev-v2` (or `prod-v2`). Prints env-paste material for BFF and the public PEM to inline in `kong/kong.yml`.
+  2. **Add the new kid at Kong, leaving the old kid in place.** Append a second entry under `consumers[].jwt_secrets` in `kong/kong.yml`, with the new public PEM inlined under `rsa_public_key: |`. Redeploy Kong (`docker compose up -d --force-recreate kong`). Kong now accepts tokens signed under **either** kid.
   3. **Cut the BFF over.** Set `BFF_INTERNAL_JWT_ACTIVE_KID=dev-v2`, swap `BFF_INTERNAL_JWT_PRIVATE_KEY` to the new private key, and append v2 to `BFF_INTERNAL_JWT_PUBLIC_KEYS` so the JWKS endpoint and verify path know both kids. Redeploy BFF. New tokens carry `kid=dev-v2`; existing v1 tokens keep verifying at Kong until they age out.
   4. **Wait `BFF_INTERNAL_JWT_TTL_SECONDS + 1 min`** (default 6 minutes). All v1-signed tokens have now expired.
-  5. **Drop the old kid.** Remove v1 from `BFF_INTERNAL_JWT_PUBLIC_KEYS`, from `kong.yml`'s `jwt_secrets`, and clear `INTERNAL_JWT_PUBKEY_*_V1` from Kong's environment. Redeploy. Done.
+  5. **Drop the old kid.** Remove v1 from `BFF_INTERNAL_JWT_PUBLIC_KEYS` and delete the v1 entry from `kong.yml`'s `jwt_secrets`. Redeploy. Done.
 
   Skipping step 2 → v2 tokens 401 at the gateway (Kong has no public key for that kid). Skipping step 4 → in-flight v1 tokens 401 prematurely. Run `audit-kid-config.mjs` before and after each step.

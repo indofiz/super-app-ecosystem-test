@@ -2,6 +2,10 @@ services:
   nginx:
     build: ./nginx
     container_name: super-app-nginx
+    # AUDIT A-3: edge container — survives crashes and host reboots so a
+    # transient failure doesn't leave the stack unreachable. Honors
+    # `docker compose stop` so debugging sessions still work as expected.
+    restart: unless-stopped
     depends_on:
       bff:
         # AUDIT A-3: wait for the BFF's /healthz to respond, not just for
@@ -50,6 +54,13 @@ services:
   bff:
     build: ./bff
     container_name: super-app-bff
+    # AUDIT A-3: auto-restart on exit so an uncaught exception or a future
+    # force-exit watchdog doesn't take nginx down with it. Only triggers
+    # on container exit, not on healthcheck failure — so does not mask a
+    # process that's wedged but still running. Track restart counts via
+    # `docker inspect -f '{{.RestartCount}}' super-app-bff` if a real
+    # crash loop appears.
+    restart: unless-stopped
     depends_on:
       redis:
         condition: service_healthy
@@ -95,6 +106,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: super-app-redis
+    # AUDIT A-3: stateful — sessions, auth state, BFF code-exchange entries
+    # all live here. Auto-restart so a crash doesn't silently log every
+    # logged-in user out. AOF persistence (--appendonly yes) below means
+    # the volume survives the restart with minimal data loss.
+    restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
@@ -160,24 +176,17 @@ services:
       #                identity-injection script (kong/lua/identity_inject.lua
       #                + the mirrored copy in kong/kong.yml).
       KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES: cjson.safe
-      # AUDIT S-5: the dev RSA public key. kong.yml references this via
-      # `{vault://env/internal-jwt-pubkey-dev-v1}` so prod can supply a
-      # different value from its secrets manager without touching the
-      # committed kong.yml. The kid is named `dev-v1` to make it visually
-      # obvious that this key has no business being live in prod — a prod
-      # deployment must set INTERNAL_JWT_PUBKEY_PROD_V1 instead and
-      # update the kid reference in kong.yml accordingly (see kong/README.md
-      # "Promoting to non-dev environments").
-      INTERNAL_JWT_PUBKEY_DEV_V1: |
-        -----BEGIN PUBLIC KEY-----
-        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4iCsrrXkdFofVghLXfbc
-        6ERoqVfi7fSPTowVQfiHiheAih3rT2jtnLZNmj0T+peOJNXHgsMRpSB8l1WgVVvt
-        IXL9BN417ewE1MpeArfI1jD5uj5X/c+q1elX3iwN5kCAO0uNmFYdyurFrW9dsGXQ
-        RJ08ba2lnZwW1DWF4mfsaMiXS0P8/m5JQYKrnqI3f9AiguZYWvq0DRatbHLYSOA5
-        pvHmgdCpVUj45T1+FeZ4A9/yPpDQnnYYTELqWo+XkQzhoFEM3ZH9SJWXXZgnu9+R
-        7xQC09bOFqOeG6GcnQVVPtpcNgv/NIHGXQmxtMF840RU55epaXatBxvlbBs6X3eh
-        xwIDAQAB
-        -----END PUBLIC KEY-----
+      # AUDIT S-5: the dev RSA public key is now inlined in kong/kong.yml's
+      # `consumers[].jwt_secrets[].rsa_public_key` (the dev PEM is not
+      # secret — its matching private key lives in bff/keys/). The previous
+      # `{vault://env/internal-jwt-pubkey-dev-v1}` indirection was dropped
+      # because Kong 3.x DB-less validates the consumer credential at
+      # config-parse time, before vault references resolve, so the literal
+      # placeholder string was reaching the RS256 validator and failing as
+      # "invalid key" — Kong wouldn't start. Prod follows the same pattern:
+      # the deploy artifact ships a prod kong.yml with the prod PEM
+      # inlined under a `prod-vN` kid (see kong/README.md "Promoting to
+      # non-dev environments").
     volumes:
       - ./kong/kong.yml:/kong/kong.yml:ro
     # No host port mapping — only nginx talks to Kong.
@@ -185,6 +194,10 @@ services:
   sample-service:
     build: ./services/sample-service
     container_name: super-app-sample-service
+    # AUDIT A-3: same rationale as bff — Kong's depends_on only waits for
+    # service_started on first boot; if the upstream dies later, Kong
+    # returns 502 until something restarts it.
+    restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: 3001

@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import type { Env } from '../../config/env.js';
 import { badRequestFromZod, unauthorized } from '../../lib/errors.js';
@@ -21,6 +22,19 @@ const BodySchema = z.object({
   code_verifier: z.string().min(43).max(128),
   client_id: z.string().min(1),
   redirect_uri: z.string().min(1),
+});
+
+/**
+ * RFC 6749 §4.1.3 mandates `application/x-www-form-urlencoded` for the
+ * token endpoint. AppAuth-{iOS,Android} (used by flutter_appauth) always
+ * POSTs this content-type and offers no JSON option. AUDIT PR-6 dropped
+ * the global urlencoded parser, so we mount one scoped to this route.
+ * `express.json()` is still global so JSON callers (tests, curl) keep
+ * working — both parsers no-op when the content-type doesn't match.
+ */
+export const tokenUrlencoded = express.urlencoded({
+  extended: false,
+  limit: '64kb',
 });
 
 export const makeTokenHandler = (deps: {

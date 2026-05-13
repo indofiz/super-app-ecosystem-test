@@ -180,10 +180,10 @@
   <!-- Action list -->
   <rect class="panel" x="60" y="820" width="960" height="160" fill="#f8fafc"/>
   <text x="76" y="842" class="label-title">Runbook</text>
-  <text x="76" y="860" class="label-sub">T1: append v2 to kong.yml jwt_secrets and set INTERNAL_JWT_PUBKEY_DEV_V2 in docker-compose. Redeploy Kong. (Both kids verify.)</text>
+  <text x="76" y="860" class="label-sub">T1: append v2 entry to kong.yml jwt_secrets with the new public PEM inlined under rsa_public_key: |. Redeploy Kong. (Both kids verify.)</text>
   <text x="76" y="878" class="label-sub">T2: set BFF_INTERNAL_JWT_ACTIVE_KID=dev-v2, swap BFF_INTERNAL_JWT_PRIVATE_KEY, append v2 to BFF_INTERNAL_JWT_PUBLIC_KEYS. Redeploy BFF.</text>
   <text x="76" y="896" class="label-sub">T3: wait BFF_INTERNAL_JWT_TTL_SECONDS + ~1 min (default 6 min) so every v1-signed token has expired.</text>
-  <text x="76" y="914" class="label-sub">T4: drop v1 from BFF env and kong.yml; clear INTERNAL_JWT_PUBKEY_DEV_V1. Redeploy.</text>
-  <text x="76" y="940" class="label-sub" fill="#9f1239">Pre-flight: node kong/scripts/audit-kid-config.mjs cross-checks bff/.env, .env, kong.yml, docker-compose.yml — run before AND after each step.</text>
+  <text x="76" y="914" class="label-sub">T4: drop the v1 entry from kong.yml jwt_secrets and from BFF_INTERNAL_JWT_PUBLIC_KEYS. Redeploy.</text>
+  <text x="76" y="940" class="label-sub" fill="#9f1239">Pre-flight: node kong/scripts/audit-kid-config.mjs cross-checks bff/.env, .env, kong.yml — run before AND after each step.</text>
   <text x="76" y="960" class="label-sub" fill="#9f1239">Tripwire: dev- vs prod- kid prefix. A prod deploy must use prod-vN; a kid=dev-* ever appearing in prod logs is a configuration alarm.</text>
 </svg>

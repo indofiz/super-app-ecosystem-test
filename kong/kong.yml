@@ -79,36 +79,45 @@ services:
           cookie_names: []
           uri_param_names: []
 
-      # §2.13 — enforce iss/aud and inject identity headers from the verified JWT.
+      # §2.13 — enforce iss/aud, inject identity headers, strip bearer.
       #
-      # Runs in the `access` phase AFTER the bundled jwt plugin has validated
-      # the signature (Kong runs higher-priority plugins first; pre-function's
-      # default priority of 1000 is below jwt's 1450). Responsibilities:
+      # SPLIT ACROSS TWO PLUGINS — read the priorities carefully:
       #
+      #   pre-function  : priority 1,000,000 — runs FIRST in access phase
+      #   jwt           : priority     1,450 — runs SECOND (signature verify)
+      #   rate-limiting : priority       910 — runs THIRD (reads X-User-Id)
+      #   post-function : priority    -1,000 — runs LAST (strips bearer)
+      #
+      # AUDIT M-1 (REVISED 2026-05-13): the original comment here claimed
+      # pre-function was priority 1000 and ran AFTER jwt. That was wrong —
+      # Kong's bundled pre-function ships at priority 1,000,000 (verify with
+      # `cat /usr/local/share/lua/5.1/kong/plugins/pre-function/handler.lua`
+      # inside the Kong container). The old code path also called
+      # `clear_header("authorization")` at the end of this script, which
+      # stripped the bearer BEFORE jwt got a chance to verify it — every
+      # /api/* call therefore 401'd with `WWW-Authenticate: Bearer` from the
+      # jwt plugin's "no token found" path. The fix splits the work:
+      # bearer-stripping moved to the `post-function` block below.
+      #
+      # pre-function responsibilities (this block):
       #   1. Strip ANY inbound X-User-Id / X-Roles / X-Session-Id from the
       #      caller — defends against header spoofing. Without this a client
       #      could send `X-User-Id: admin` and a downstream service that
       #      naively trusts the header would honor it.
-      #   2. Decode the verified JWT's claims and enforce iss/aud — the
-      #      bundled jwt plugin verifies signature and exp but cannot
-      #      check iss/aud, so any other internal signer sharing the kid
-      #      would otherwise be accepted (AUDIT S-1).
-      #   3. Re-set the X-User-Id / X-Session-Id / X-Roles headers from
-      #      values we trust (sub, sid, roles). Downstream services read
-      #      identity from headers instead of decoding JWTs themselves.
-      #   4. Strip the Authorization header before forwarding (AUDIT S-3) so
-      #      raw bearers don't leak into upstream logs / stores.
+      #   2. Decode the JWT payload and enforce iss/aud (AUDIT S-1). We
+      #      decode WITHOUT signature verification here — that runs next, in
+      #      the bundled jwt plugin. If the token is forged, jwt 401s and
+      #      Kong never proxies, so any X-* headers we set on a forged
+      #      token cannot reach the upstream service. We accept that trade
+      #      because rate-limiting (priority 910) needs X-User-Id set before
+      #      it runs, and pre-function is the only "execute Lua" slot above
+      #      910 that Kong gives us declaratively.
+      #   3. Re-set X-User-Id / X-Session-Id / X-Roles from the claims.
+      #      Downstream services read identity from these headers instead
+      #      of decoding JWTs themselves.
       #
-      # We re-decode (not re-verify) here — by the time this Lua runs, the
-      # jwt plugin has already proven the signature is good.
-      #
-      # AUDIT M-1: this plugin RELIES on Kong's default plugin-priority
-      # ordering placing jwt (1450) before pre-function (1000). Kong 3.x
-      # has no declarative override for the bundled pre-function priority,
-      # so this dependency is enforced by Kong defaults only. TODO: add a
-      # contract test that forges a token with a spoofed X-User-Id through
-      # Kong and asserts the spoof loses, so a future Kong upgrade flipping
-      # priorities is caught in CI.
+      # post-function (below) handles step 4 (clear Authorization) after jwt
+      # has verified the signature.
       #
       # AUDIT M-2: the Lua below is also kept in `kong/lua/identity_inject.lua`
       # as the reviewable canonical source. Kong's pre-function plugin has no
@@ -117,12 +126,9 @@ services:
       # two diverge. Edit BOTH together, then re-run the check.
       #
       # AUDIT P-4 (perf): this Lua runs in access-phase on every request and
-      # re-decodes the JWT payload. JIT-compiled in OpenResty, so cost is
-      # microseconds — well below the cost of the jwt plugin's RSA verify
-      # that already ran. If profiling ever flags it: the bundled jwt plugin
-      # in 3.x stashes the parsed JWT in `kong.ctx.shared.authenticated_jwt_token`
-      # (plugin-version-dependent); switch to reading that instead of
-      # base64-decoding the payload again.
+      # decodes the JWT payload. JIT-compiled in OpenResty, so cost is
+      # microseconds. If profiling ever flags it: stash the parsed claims in
+      # `kong.ctx.shared` from here and let post-function re-use them.
       - name: pre-function
         config:
           access:
@@ -137,17 +143,16 @@ services:
               local token = string.match(auth, "^[Bb]earer%s+(.+)$")
               if not token then return end
 
-              -- Pull the payload out of the JWT. Signature is already verified
-              -- by the bundled jwt plugin running before us — we only decode.
-              -- We can't `require "kong.plugins.jwt.jwt_parser"` (sandbox), so
-              -- do the base64url + JSON dance inline.
+              -- Pull the payload out of the JWT. We decode WITHOUT verifying the signature
+              -- here: jwt plugin (priority 1450) runs after us and rejects the request if
+              -- the signature is bad, so any X-* headers we set on a forged token never
+              -- reach upstream (Kong 401s before proxying). We need to set X-User-Id
+              -- before priority 910 so rate-limiting can limit per user — that is the
+              -- whole reason this work is in pre-function and not post-function.
               --
               -- AUDIT S-9: all three captures use `+` (one-or-more) rather than the
-              -- previous permissive `*` (zero-or-more) on the signature segment. By
-              -- the time this runs the bundled jwt plugin has already proved the
-              -- signature is well-formed and valid, so this is belt-and-braces — but
-              -- it stops a malformed-but-decodable token from sliding through if a
-              -- future plugin-ordering change ever puts us in front of jwt.
+              -- previous permissive `*` (zero-or-more) on the signature segment. Belt-
+              -- and-braces: stops a malformed-but-decodable token from sliding through.
               local _, payload_b64 = string.match(token, "([^%.]+)%.([^%.]+)%.([^%.]+)")
               if not payload_b64 then return end
               local p = payload_b64:gsub("-", "+"):gsub("_", "/")
@@ -184,7 +189,9 @@ services:
                 return kong.response.exit(401, { message = "invalid audience" })
               end
 
-              -- step 3: re-set headers from verified claims
+              -- step 3: re-set headers from claims. jwt plugin verifies signature after
+              -- us; if verification fails, Kong 401s before proxying so these never
+              -- reach the upstream service.
               if claims.sub then
                 kong.service.request.set_header("X-User-Id", tostring(claims.sub))
               end
@@ -201,10 +208,27 @@ services:
                 end
               end
 
-              -- step 4: strip the bearer before forwarding upstream (AUDIT S-3).
-              -- Identity is now in X-User-Id / X-Session-Id / X-Roles; the raw
-              -- JWT has no purpose downstream and only widens the blast radius
-              -- if an upstream is ever compromised.
+              -- NOTE: Authorization-header stripping lives in the `post-function` plugin
+              -- in kong.yml (priority -1000), which runs after jwt has verified the
+              -- signature. Do not add `kong.service.request.clear_header("authorization")`
+              -- here — doing so causes jwt to see no bearer and 401 every request.
+
+      # AUDIT S-3 (split from pre-function 2026-05-13): strip the raw bearer
+      # before forwarding upstream. Identity is already in X-User-Id /
+      # X-Session-Id / X-Roles (set by pre-function above); the JWT has no
+      # purpose downstream and only widens the blast radius if an upstream is
+      # ever compromised.
+      #
+      # MUST be a post-function (priority -1000), not pre-function. Kong's
+      # bundled pre-function runs at priority 1,000,000 — BEFORE jwt (1450).
+      # Stripping the Authorization header in pre-function deletes the bearer
+      # before jwt can verify it, producing a 401 on every authenticated
+      # request. post-function runs after jwt has accepted the token, so
+      # the header is safe to remove here.
+      - name: post-function
+        config:
+          access:
+            - |
               kong.service.request.clear_header("authorization")
 
       # AUDIT P-1: per-user rate limiting at the gateway. Runs at priority 910
@@ -272,14 +296,33 @@ plugins:
 # token, so the matching private key staying on a developer laptop is the
 # desired posture. For prod, the deploy artifact must:
 #   1. Use a different kid (`prod-v1`, `prod-v2`, ...)
-#   2. Source the public key from its secrets manager via a different env
-#      var name (INTERNAL_JWT_PUBKEY_PROD_V1), referenced here by the
-#      matching `{vault://env/internal-jwt-pubkey-prod-v1}` lookup.
-# The `{vault://env/...}` reference (AUDIT S-5 fix) means kong.yml itself
-# is deploy-agnostic: same file in dev and prod, different env source.
+#   2. Inline the prod public PEM under `rsa_public_key: |` in the prod
+#      kong.yml (sourced from the secret manager at deploy time).
+#
+# Why inline and not `{vault://env/...}`: Kong 3.x DB-less validates the
+# `consumers.jwt_secrets` entity at config-parse time, BEFORE vault
+# references are resolved. A `{vault://env/internal-jwt-pubkey-dev-v1}`
+# value therefore reaches the RS256 conditional validator as a literal
+# string, which it rejects with "rsa_public_key: invalid key" and
+# init_by_lua aborts (Kong won't start, healthcheck never passes,
+# nginx fails to launch with "dependency failed: super-app-kong is
+# unhealthy"). The dev PEM is not secret — its matching private key is
+# committed under bff/keys/ — so inlining it here is safe; for prod the
+# PEM is also not a secret (the private half is in your secret manager),
+# so the same pattern applies. Different env, different file content,
+# same shape.
 consumers:
   - username: super-app-bff
     jwt_secrets:
       - key: dev-v1
         algorithm: RS256
-        rsa_public_key: "{vault://env/internal-jwt-pubkey-dev-v1}"
+        rsa_public_key: |
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4iCsrrXkdFofVghLXfbc
+          6ERoqVfi7fSPTowVQfiHiheAih3rT2jtnLZNmj0T+peOJNXHgsMRpSB8l1WgVVvt
+          IXL9BN417ewE1MpeArfI1jD5uj5X/c+q1elX3iwN5kCAO0uNmFYdyurFrW9dsGXQ
+          RJ08ba2lnZwW1DWF4mfsaMiXS0P8/m5JQYKrnqI3f9AiguZYWvq0DRatbHLYSOA5
+          pvHmgdCpVUj45T1+FeZ4A9/yPpDQnnYYTELqWo+XkQzhoFEM3ZH9SJWXXZgnu9+R
+          7xQC09bOFqOeG6GcnQVVPtpcNgv/NIHGXQmxtMF840RU55epaXatBxvlbBs6X3eh
+          xwIDAQAB
+          -----END PUBLIC KEY-----

@@ -15,9 +15,18 @@
 // otherwise. Does not require Docker.
 //
 // Sources checked:
-//   - kong/kong.yml          → `jwt_secrets[].key`, and the env-vault
-//                              reference name inside `rsa_public_key`
-//   - docker-compose.yml     → `INTERNAL_JWT_PUBKEY_*` env vars under kong
+//   - kong/kong.yml          → `jwt_secrets[].key`, plus whether each
+//                              entry has an inline PEM (`rsa_public_key: |`
+//                              block) or an env-vault reference. Inline is
+//                              the supported pattern; vault refs are kept
+//                              detected so a stale config gets flagged
+//                              (Kong 3.x rejects them at parse time on
+//                              consumer credentials — see kong/README.md
+//                              "Why not `{vault://env/...}`?").
+//   - docker-compose.yml     → `INTERNAL_JWT_PUBKEY_*` env vars under kong.
+//                              Should be empty now that dev inlines the
+//                              PEM in kong.yml; any leftover var is dead
+//                              material.
 //   - .env / bff/.env        → BFF_INTERNAL_JWT_ACTIVE_KID,
 //                              BFF_INTERNAL_JWT_PUBLIC_KEYS (JSON of kids)
 
@@ -35,10 +44,11 @@ const read = (relPath) => {
 
 // --- parsers ----------------------------------------------------------------
 
-// Pull `- key: <kid>` lines from kong.yml's jwt_secrets block, plus the
-// matching env-vault reference target on each entry.
+// Pull `- key: <kid>` lines from kong.yml's jwt_secrets block, plus
+// whether each entry uses an inline PEM block or a (deprecated) env-vault
+// reference for rsa_public_key.
 const parseKongYml = (src) => {
-  const out = []; // { kid, vaultEnvKey | null }
+  const out = []; // { kid, vaultEnvKey | null, inlinePem: boolean }
   const lines = src.split(/\r?\n/);
   let inSecrets = false;
   let current = null;
@@ -58,11 +68,17 @@ const parseKongYml = (src) => {
     const keyMatch = line.match(/^\s*-\s*key:\s*(\S+)\s*$/);
     if (keyMatch) {
       if (current) out.push(current);
-      current = { kid: keyMatch[1], vaultEnvKey: null };
+      current = { kid: keyMatch[1], vaultEnvKey: null, inlinePem: false };
       continue;
     }
-    // Look for the env-vault reference shape:
-    //   rsa_public_key: "{vault://env/<key-name>}"
+    // Inline PEM shape: `rsa_public_key: |` (block scalar follows).
+    if (current && /^\s*rsa_public_key:\s*\|\s*$/.test(line)) {
+      current.inlinePem = true;
+      continue;
+    }
+    // Env-vault reference shape: `rsa_public_key: "{vault://env/<key>}"`.
+    // Kept detected so we can warn — Kong 3.x DB-less rejects this on
+    // consumer credentials at config-parse time.
     const vaultMatch = line.match(/rsa_public_key:\s*["']?\{vault:\/\/env\/([a-zA-Z0-9_-]+)\}["']?/);
     if (vaultMatch && current) {
       // Kong env vault converts dashes to underscores and uppercases.
@@ -132,27 +148,29 @@ if (kongKids.length === 0) {
   findings.push('kong.yml: no jwt_secrets entries found — gateway will 401 every request');
 }
 
-// Each kong.yml kid that references a vault env must have a matching env var
-// declared in docker-compose.yml.
-for (const { kid, vaultEnvKey } of kongKids) {
-  if (vaultEnvKey && !composeEnvKeys.has(vaultEnvKey)) {
+// Every kid in kong.yml must source its public key somehow. Inline PEM is
+// the supported pattern; an entry with neither inline PEM nor any rsa_public_key
+// at all means Kong will fail to parse the config.
+for (const { kid, vaultEnvKey, inlinePem } of kongKids) {
+  if (vaultEnvKey) {
     findings.push(
-      `kong.yml kid "${kid}" references vault env "${vaultEnvKey}", but docker-compose.yml has no matching env var on the kong service`,
+      `kong.yml kid "${kid}" uses {vault://env/...} for rsa_public_key — Kong 3.x DB-less rejects this at parse time on consumer credentials. Inline the PEM under \`rsa_public_key: |\` instead (see kong/README.md "Why not {vault://env/...}?").`,
+    );
+  } else if (!inlinePem) {
+    findings.push(
+      `kong.yml kid "${kid}" has no rsa_public_key block — Kong will fail to parse this consumer credential.`,
     );
   }
 }
 
-// Each docker-compose env var that looks like a kid PEM should correspond
-// to a kid in kong.yml.
-const referencedComposeKeys = new Set(
-  kongKids.filter((k) => k.vaultEnvKey).map((k) => k.vaultEnvKey),
-);
+// docker-compose.yml should no longer carry INTERNAL_JWT_PUBKEY_* env vars
+// for the kong service — the dev PEM lives in kong.yml now. Anything left
+// over is either dead material from the pre-inline era or a stale prod
+// override the operator forgot to remove.
 for (const key of composeEnvKeys) {
-  if (!referencedComposeKeys.has(key)) {
-    findings.push(
-      `docker-compose.yml declares ${key} but no kong.yml jwt_secrets entry references it — dead key material`,
-    );
-  }
+  findings.push(
+    `docker-compose.yml declares ${key} on the kong service but Kong no longer reads PEMs from env — the public key lives in kong.yml. Delete this env var.`,
+  );
 }
 
 // BFF env: active kid must be in publicKids; both must overlap with kong.yml's kids.
@@ -186,9 +204,14 @@ checkBff('bff/.env', localBff);
 
 // --- report -----------------------------------------------------------------
 
+const describeKid = (k) => {
+  if (k.inlinePem) return `${k.kid} → (inline pem)`;
+  if (k.vaultEnvKey) return `${k.kid} → vault://env (UNSUPPORTED)`;
+  return `${k.kid} → (no key)`;
+};
 console.log('audit-kid-config: state summary');
-console.log(`  kong.yml kids        : ${kongKids.map((k) => `${k.kid} → ${k.vaultEnvKey ?? '(inline pem)'}`).join(', ') || '(none)'}`);
-console.log(`  docker-compose env   : ${[...composeEnvKeys].join(', ') || '(none)'}`);
+console.log(`  kong.yml kids        : ${kongKids.map(describeKid).join(', ') || '(none)'}`);
+console.log(`  docker-compose env   : ${[...composeEnvKeys].join(', ') || '(none — expected)'}`);
 if (wsBff) {
   console.log(`  workspace .env       : active=${wsBff.activeKid ?? '?'}, public=[${wsBff.publicKids.join(', ')}]`);
 }
