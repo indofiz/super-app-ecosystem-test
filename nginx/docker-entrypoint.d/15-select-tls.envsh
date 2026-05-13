@@ -1,0 +1,25 @@
+#!/bin/sh
+# AUDIT S-1: select which default.conf.template the envsubst entrypoint
+# (20-envsubst-on-templates.sh) will render based on $NGINX_TLS_ENABLED.
+#
+# Sourced (not executed) because of the .envsh suffix — env exports below
+# also persist into the envsubst step that runs after this script.
+#
+# Default mode is HTTP-only (NGINX_TLS_ENABLED unset or != "true"). The
+# COPY in the Dockerfile already places the HTTP template at
+# /etc/nginx/templates/default.conf.template; this script only acts when
+# TLS is explicitly enabled.
+
+if [ "${NGINX_TLS_ENABLED:-false}" = "true" ]; then
+    echo "15-select-tls: NGINX_TLS_ENABLED=true — installing TLS template"
+    cp /etc/nginx/templates-tls/default.conf.template \
+       /etc/nginx/templates/default.conf.template
+
+    # Defaults for the cert paths so envsubst doesn't expand them to "".
+    # Override by setting these in docker-compose.yml or your secrets layer.
+    export NGINX_TLS_CERT_PATH="${NGINX_TLS_CERT_PATH:-/etc/nginx/certs/fullchain.pem}"
+    export NGINX_TLS_KEY_PATH="${NGINX_TLS_KEY_PATH:-/etc/nginx/certs/privkey.pem}"
+    export NGINX_TLS_TRUSTED_CHAIN_PATH="${NGINX_TLS_TRUSTED_CHAIN_PATH:-/etc/nginx/certs/chain.pem}"
+else
+    echo "15-select-tls: NGINX_TLS_ENABLED!=true — keeping HTTP-only template"
+fi

@@ -1,0 +1,137 @@
+upstream bff {
+    server bff:3000;
+    # AUDIT P-3: warm pool sized for bursty mobile traffic. 16 was tight
+    # under spike — depletes quickly and nginx falls back to fresh TCP
+    # connections, costing p99 latency. 64 idle conns × N workers gives
+    # plenty of headroom at our traffic shape.
+    keepalive 64;
+    keepalive_requests 1000;
+    keepalive_timeout  60s;
+}
+
+upstream kong {
+    server kong:8000;
+    keepalive 64;
+    keepalive_requests 1000;
+    keepalive_timeout  60s;
+}
+
+# AUDIT S-4: default_server sink. nginx routes any Host that doesn't match a
+# named server to the first one defined; without this, an attacker setting
+# Host: evil.example would still hit the routing rules below and have
+# X-Forwarded-Host: evil.example threaded into the BFF. 444 closes the
+# connection without sending any bytes back.
+server {
+    listen      80 default_server;
+    listen      [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
+# AUDIT A-2: internal metrics listener for nginx-prometheus-exporter.
+# Listens on :8081 with NO host port mapping in docker-compose.yml — only
+# containers on the same docker network can reach it. ACL is belt-and-braces
+# so the surface stays closed even if the network topology changes later.
+server {
+    listen      8081;
+    server_name _;
+    access_log  off;
+
+    location = /nginx-status {
+        stub_status;
+        allow 172.16.0.0/12;   # docker bridge networks
+        allow 127.0.0.1;       # in-container loopback
+        deny  all;
+    }
+
+    location / { return 404; }
+}
+
+server {
+    listen      80;
+    listen      [::]:80;
+    server_name ${NGINX_SERVER_NAME};
+
+    include /etc/nginx/snippets/security_headers.conf;
+
+    # AUDIT S-2: cap concurrent connections per client IP. Pairs with the
+    # limit_req zones to bound both connection count and request rate.
+    limit_conn perip 32;
+
+    # ACME HTTP-01 challenge (certbot --webroot). Present in BOTH modes so
+    # initial cert issuance works while NGINX_TLS_ENABLED is still false,
+    # and so renewals keep working after the TLS flip. Webroot stays empty
+    # except for the brief window certbot is writing proofs.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+    }
+
+    # nginx self-health (does NOT depend on upstreams).
+    location = /nginx-health {
+        access_log off;
+        default_type application/json;
+        return 200 '{"status":"ok"}';
+    }
+
+    # /auth/* → BFF
+    location /auth/ {
+        # AUDIT S-10: tighten body cap on auth endpoints (token payloads,
+        # profile JSON). Overrides the 4m global default in nginx.conf.
+        client_max_body_size 64k;
+        limit_req zone=auth_default burst=20 nodelay;
+        access_log /var/log/nginx/auth-access.log main;
+        include /etc/nginx/snippets/proxy_common.conf;
+        proxy_pass http://bff;
+    }
+
+    # AUDIT M-5: `location =` exact-match has higher priority than the
+    # `/auth/` prefix above, so these blocks win for these two paths and
+    # apply the tighter auth_token zone (10 r/s vs 30 r/s).
+    location = /auth/token {
+        client_max_body_size 64k;
+        limit_req zone=auth_token burst=10 nodelay;
+        access_log /var/log/nginx/auth-access.log main;
+        include /etc/nginx/snippets/proxy_common.conf;
+        proxy_pass http://bff;
+    }
+    location = /auth/refresh {
+        client_max_body_size 64k;
+        limit_req zone=auth_token burst=10 nodelay;
+        access_log /var/log/nginx/auth-access.log main;
+        include /etc/nginx/snippets/proxy_common.conf;
+        proxy_pass http://bff;
+    }
+
+    # Health endpoints proxied to BFF — these answer "is BFF + Redis up?".
+    # /nginx-health (above) answers "is nginx up?".
+    location = /healthz {
+        include /etc/nginx/snippets/proxy_common.conf;
+        proxy_pass http://bff;
+    }
+    location = /readyz {
+        include /etc/nginx/snippets/proxy_common.conf;
+        proxy_pass http://bff;
+    }
+
+    # /api/* → Kong (currently a `traefik/whoami` placeholder).
+    location /api/ {
+        # AUDIT S-3: data-plane edge limit. Kong has no rate-limit plugin
+        # today, so this is the only ceiling on /api/* request rate.
+        limit_req zone=api_default burst=200 nodelay;
+        include /etc/nginx/snippets/proxy_common.conf;
+        proxy_pass http://kong;
+    }
+
+    # Default: 404 — this is an API edge, not a website host.
+    # AUDIT S-9: match the BFF's 404 shape so contract tests don't see two
+    # different error envelopes for unknown routes (nginx vs BFF).
+    location / {
+        default_type application/json;
+        return 404 '{"error":"not_found","error_description":"Route not found"}';
+    }
+}
+# Production TLS is opt-in via NGINX_TLS_ENABLED — see nginx/conf.d-tls/
+# and the 15-select-tls.envsh entrypoint script. The template above is the
+# HTTP-only base; the TLS variant lives next door and is swapped in at
+# container start when the env flag is set.

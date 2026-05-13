@@ -1,0 +1,211 @@
+services:
+  nginx:
+    build: ./nginx
+    container_name: super-app-nginx
+    depends_on:
+      bff:
+        # AUDIT A-3: wait for the BFF's /healthz to respond, not just for
+        # the container to exist. service_started races the Express bind
+        # and produces "first-second-after-up" 502s on /auth/*.
+        condition: service_healthy
+      kong:
+        # AUDIT A-3: wait for Kong's `kong health` to pass, not just for
+        # the container to be running. Without this, nginx can start and
+        # 502 the first burst of requests while Kong is still booting.
+        condition: service_healthy
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-localhost}
+      # AUDIT S-1: TLS overlay. Set NGINX_TLS_ENABLED=true in .env (or here)
+      # to switch nginx to the TLS template. Dev defaults to HTTP-only.
+      NGINX_TLS_ENABLED: ${NGINX_TLS_ENABLED:-false}
+      NGINX_TLS_CERT_PATH: ${NGINX_TLS_CERT_PATH:-/etc/nginx/certs/fullchain.pem}
+      NGINX_TLS_KEY_PATH: ${NGINX_TLS_KEY_PATH:-/etc/nginx/certs/privkey.pem}
+      NGINX_TLS_TRUSTED_CHAIN_PATH: ${NGINX_TLS_TRUSTED_CHAIN_PATH:-/etc/nginx/certs/chain.pem}
+    volumes:
+      # AUDIT S-1: cert mount point. Files are gitignored (see .gitignore).
+      # In dev: empty; the TLS overlay is off so nginx never reads from here.
+      # In prod: mount fullchain.pem / privkey.pem / chain.pem here, or use
+      # a Docker volume that certbot also writes into.
+      - ./nginx/certs:/etc/nginx/certs:ro
+      # ACME HTTP-01 webroot. Empty in dev. In prod, certbot --webroot
+      # writes its challenge files here; nginx serves them at
+      # /.well-known/acme-challenge/. See docs/DEPLOYMENT.md.
+      - certbot-webroot:/var/www/certbot
+    ports:
+      - "8080:80"
+      # AUDIT S-1: 443 mapping is always present; nginx only listens on it
+      # when NGINX_TLS_ENABLED=true. Connection refused when TLS is off.
+      - "8443:443"
+    # AUDIT A-1: readiness probe — verifies the full edge path (nginx →
+    # BFF → Redis + KC discovery) so service_healthy dependents don't
+    # start until traffic can actually flow. /nginx-health remains
+    # available for k8s liveness probes when we migrate off compose.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  bff:
+    build: ./bff
+    container_name: super-app-bff
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      REDIS_URL: redis://redis:6379
+      # Public base URL = whatever the user's browser sees. Behind nginx in
+      # dev that's http://localhost:8080. The BFF builds its OAuth callback
+      # as ${PUBLIC_BASE_URL}/auth/callback — must match a Keycloak Valid
+      # Redirect URI.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      KC_ISSUER: ${KC_ISSUER}
+      KC_CLIENT_ID: ${KC_CLIENT_ID:-super-app-bff}
+      KC_CLIENT_SECRET: ${KC_CLIENT_SECRET}
+      KC_SCOPES: ${KC_SCOPES:-openid profile email}
+      ALLOWED_APP_CLIENTS: ${ALLOWED_APP_CLIENTS:-super-app-eco}
+      ALLOWED_APP_REDIRECT_URIS: ${ALLOWED_APP_REDIRECT_URIS}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-2592000}
+      AUTHSTATE_TTL_SECONDS: ${AUTHSTATE_TTL_SECONDS:-600}
+      BFFCODE_TTL_SECONDS: ${BFFCODE_TTL_SECONDS:-300}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      BFF_INTERNAL_JWT_ALG: ${BFF_INTERNAL_JWT_ALG:-RS256}
+      BFF_INTERNAL_JWT_ACTIVE_KID: ${BFF_INTERNAL_JWT_ACTIVE_KID:-v1}
+      BFF_INTERNAL_JWT_PRIVATE_KEY: ${BFF_INTERNAL_JWT_PRIVATE_KEY}
+      BFF_INTERNAL_JWT_PUBLIC_KEYS: ${BFF_INTERNAL_JWT_PUBLIC_KEYS}
+      BFF_INTERNAL_JWT_TTL_SECONDS: ${BFF_INTERNAL_JWT_TTL_SECONDS:-300}
+      BFF_INTERNAL_JWT_ISSUER: ${BFF_INTERNAL_JWT_ISSUER:-super-app-bff}
+      BFF_INTERNAL_JWT_AUDIENCE: ${BFF_INTERNAL_JWT_AUDIENCE:-super-app-services}
+    # No host port mapping — only nginx talks to the BFF.
+    # AUDIT A-3: real readiness gate so nginx's service_healthy depends_on
+    # actually waits for Express to bind. /healthz is the cheap liveness
+    # endpoint (no I/O); /readyz would add Redis + KC discovery checks
+    # but is too strict for a startup gate.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: super-app-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    # Uncomment to inspect Redis from the host:
+    # ports:
+    #   - "6379:6379"
+
+  kong:
+    image: kong:3.8.0-ubuntu
+    container_name: super-app-kong
+    # AUDIT A-3: keep Kong up across crashes; orchestrators will recreate
+    # the container on failure rather than leaving the edge dead.
+    restart: unless-stopped
+    # AUDIT PR-3 (partial): block privilege escalation. Other hardening
+    # the audit recommends — `read_only: true` + tmpfs, `user:` override,
+    # `cap_drop: [ALL]` — require runtime verification on the
+    # kong:3.8.0-ubuntu image (the entrypoint runs briefly as root and
+    # writes to /usr/local/kong/* and /tmp). Tracked as a TODO; add once
+    # we have a staging stack to confirm Kong still starts cleanly.
+    security_opt:
+      - no-new-privileges:true
+    # AUDIT A-3: real readiness gate so nginx's `service_healthy`
+    # depends_on actually waits for Kong to start serving. `kong health`
+    # returns 0 only after the worker has loaded declarative config.
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      sample-service:
+        condition: service_started
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      # AUDIT S-10: Admin API permanently disabled. Re-enabling it — even
+      # on localhost — bypasses every plugin enforced in this audit (jwt,
+      # rate-limiting, identity injection, request-size-limiting). Any
+      # change to this line requires explicit security sign-off.
+      KONG_ADMIN_LISTEN: "off"
+      # AUDIT PR-2: Status API exposes the prometheus plugin's /metrics
+      # endpoint and Kong's own health endpoint. Bound to the internal
+      # Docker network only — there is intentionally no host port mapping
+      # below. Same caveat as the BFF's /metrics: do not expose publicly.
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
+      KONG_LOG_LEVEL: notice
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      # No JWT secret here — Kong only reads RSA public keys from kong.yml.
+      # The BFF holds the private key; Kong cannot mint tokens.
+      #
+      # AUDIT S-8: pre-function Lua sandbox allow-list registry. Every
+      # entry below must be justified — extending this list quietly is how
+      # Lua sandboxes become Lua-soup. Require code-review on changes.
+      #   cjson.safe — JWT payload JSON decoding in the access-phase
+      #                identity-injection script (kong/lua/identity_inject.lua
+      #                + the mirrored copy in kong/kong.yml).
+      KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES: cjson.safe
+      # AUDIT S-5: the dev RSA public key. kong.yml references this via
+      # `{vault://env/internal-jwt-pubkey-dev-v1}` so prod can supply a
+      # different value from its secrets manager without touching the
+      # committed kong.yml. The kid is named `dev-v1` to make it visually
+      # obvious that this key has no business being live in prod — a prod
+      # deployment must set INTERNAL_JWT_PUBKEY_PROD_V1 instead and
+      # update the kid reference in kong.yml accordingly (see kong/README.md
+      # "Promoting to non-dev environments").
+      INTERNAL_JWT_PUBKEY_DEV_V1: |
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4iCsrrXkdFofVghLXfbc
+        6ERoqVfi7fSPTowVQfiHiheAih3rT2jtnLZNmj0T+peOJNXHgsMRpSB8l1WgVVvt
+        IXL9BN417ewE1MpeArfI1jD5uj5X/c+q1elX3iwN5kCAO0uNmFYdyurFrW9dsGXQ
+        RJ08ba2lnZwW1DWF4mfsaMiXS0P8/m5JQYKrnqI3f9AiguZYWvq0DRatbHLYSOA5
+        pvHmgdCpVUj45T1+FeZ4A9/yPpDQnnYYTELqWo+XkQzhoFEM3ZH9SJWXXZgnu9+R
+        7xQC09bOFqOeG6GcnQVVPtpcNgv/NIHGXQmxtMF840RU55epaXatBxvlbBs6X3eh
+        xwIDAQAB
+        -----END PUBLIC KEY-----
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    # No host port mapping — only nginx talks to Kong.
+
+  sample-service:
+    build: ./services/sample-service
+    container_name: super-app-sample-service
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+    # No host port mapping — only Kong talks to the sample service.
+
+  # AUDIT A-2: nginx-prometheus-exporter scrapes nginx's stub_status on the
+  # docker network. No host port mapping — Prometheus (when deployed)
+  # scrapes this container directly via the docker network or k8s service.
+  # Same posture as the BFF's /metrics: internal-only.
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.4.0
+    container_name: super-app-nginx-exporter
+    command:
+      - --nginx.scrape-uri=http://nginx:8081/nginx-status
+    depends_on:
+      nginx:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  # ACME HTTP-01 webroot shared between nginx (reads) and certbot (writes).
+  # Created lazily — empty in dev, populated only when certbot is run.
+  certbot-webroot:

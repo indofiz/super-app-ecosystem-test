@@ -1,0 +1,21 @@
+# BFF-solo dev compose: brings up only Redis so you can run the BFF directly
+# with `npm run dev` against it. For the integrated stack (nginx + bff + redis
+# + kong-stub) use the workspace-level docker-compose.yml at the repo root.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: super-app-bff-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:

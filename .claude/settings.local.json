@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter --version)",
+      "Bash(flutter pub *)",
+      "PowerShell(New-Item *)",
+      "Bash(flutter analyze *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "PowerShell(docker run *)",
+      "Bash(docker compose *)",
+      "Bash(powershell *)",
+      "Bash(node *)",
+      "Bash(docker build *)",
+      "Bash(docker run *)",
+      "PowerShell(docker pull *)",
+      "PowerShell(docker exec super-app-nginx *)",
+      "PowerShell(Get-ChildItem \"D:\\\\DISKOMINFO\\\\super-app-ecosystem-test\\\\bff\" -Force -Name | Where-Object { $_ -match '^\\\\.' })"
+    ]
+  }
+}

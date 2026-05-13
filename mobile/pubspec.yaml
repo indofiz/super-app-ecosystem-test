@@ -1,0 +1,41 @@
+name: smart_app_test
+description: "Pangkal Pinang super app — main user app (Flutter, BFF-mediated SSO)."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Auth (BFF-mediated, never direct to Keycloak)
+  flutter_appauth: ^8.0.3
+  flutter_secure_storage: ^9.2.2
+
+  # State management
+  flutter_bloc: ^8.1.6
+  equatable: ^2.0.5
+
+  # Networking
+  dio: ^5.7.0
+
+  # Routing
+  go_router: ^14.6.1
+
+  # Config
+  flutter_dotenv: ^5.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  bloc_test: ^9.1.7
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    - .env
