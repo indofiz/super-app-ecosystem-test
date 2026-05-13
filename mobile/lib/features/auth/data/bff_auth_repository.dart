@@ -1,18 +1,15 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/logging/auth_log.dart';
 import '../../../core/storage/secure_store.dart';
 import '../domain/auth_repository.dart';
 import '../domain/auth_session.dart';
 import 'bff_auth_api.dart';
 
-void _log(String msg) {
-  // ignore: avoid_print
-  if (kDebugMode) print('[AUTH] $msg');
-}
+void _log(String msg) => authLog('repo', msg);
 
 /// Real BFF-mediated auth repository.
 ///
@@ -47,13 +44,11 @@ class BffAuthRepository implements AuthRepository {
     required String accessToken,
     required String sessionId,
     required DateTime expiresAt,
-    String? idToken,
   }) =>
       AuthSession(
         accessToken: accessToken,
         sessionId: sessionId,
         expiresAt: expiresAt,
-        idToken: idToken,
       );
 
   @override
@@ -70,7 +65,6 @@ class BffAuthRepository implements AuthRepository {
       accessToken: stored.accessToken,
       sessionId: stored.sessionId,
       expiresAt: stored.expiresAt,
-      idToken: stored.idToken,
     );
     _controller.add(session);
     return session;

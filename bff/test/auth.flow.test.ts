@@ -7,6 +7,7 @@ import { createApp } from '../src/app.js';
 import { AuthStateStore } from '../src/auth/stores/authState.store.js';
 import { BffCodeStore } from '../src/auth/stores/bffCode.store.js';
 import { SessionStore } from '../src/auth/stores/session.store.js';
+import { UserSessionsStore } from '../src/auth/stores/userSessions.store.js';
 import type { Env } from '../src/config/env.js';
 import { InternalJwtIssuer } from '../src/lib/internalJwt.js';
 import {
@@ -56,6 +57,13 @@ const env: Env = {
   BFF_INTERNAL_JWT_TTL_SECONDS: 300,
   BFF_INTERNAL_JWT_ISSUER: 'super-app-bff',
   BFF_INTERNAL_JWT_AUDIENCE: 'super-app-services',
+  TRUST_PROXY: 'loopback',
+  REQUEST_TIMEOUT_MS: 12_000,
+  METRICS_ENABLED: false,
+  TRACING_ENABLED: false,
+  OTEL_SERVICE_NAME: 'super-app-bff-test',
+  BUILD_COMMIT: 'test',
+  BUILD_VERSION: 'test',
 };
 
 const buildInternalJwtIssuer = (ttlOverride?: number): Promise<InternalJwtIssuer> =>
@@ -166,7 +174,7 @@ const installCallShim = (mock: Redis): Redis => {
 
 const buildHarness = async (kcOpts: FakeKeycloakOpts = {}, issuerTtl?: number) => {
   const log = createLogger(env);
-  const redis = installCallShim(new IoRedisMock() as unknown as Redis);
+  const redis = installCallShim(new IoRedisMock());
   const { client: keycloak, calls } = await buildFakeKeycloak(kcOpts);
   const internalJwtIssuer = await buildInternalJwtIssuer(issuerTtl);
   const keycloakJwtVerifier = await buildTestVerifier();
@@ -183,6 +191,7 @@ const buildHarness = async (kcOpts: FakeKeycloakOpts = {}, issuerTtl?: number) =
       authStateStore: new AuthStateStore(redis, env.AUTHSTATE_TTL_SECONDS),
       bffCodeStore: new BffCodeStore(redis, env.BFFCODE_TTL_SECONDS),
       sessionStore: new SessionStore(redis, env.SESSION_TTL_SECONDS),
+      userSessionsStore: new UserSessionsStore(redis, env.SESSION_TTL_SECONDS),
       internalJwtIssuer,
     },
   });

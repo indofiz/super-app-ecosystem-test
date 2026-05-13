@@ -7,6 +7,7 @@ import { createApp } from '../src/app.js';
 import { AuthStateStore } from '../src/auth/stores/authState.store.js';
 import { BffCodeStore } from '../src/auth/stores/bffCode.store.js';
 import { SessionStore } from '../src/auth/stores/session.store.js';
+import { UserSessionsStore } from '../src/auth/stores/userSessions.store.js';
 import type { Env } from '../src/config/env.js';
 import { InternalJwtIssuer } from '../src/lib/internalJwt.js';
 import type { KeycloakClient, OidcDiscovery } from '../src/lib/keycloak.js';
@@ -53,6 +54,8 @@ const env: Env = {
   OTEL_SERVICE_NAME: 'super-app-bff',
   BUILD_COMMIT: 'test-commit',
   BUILD_VERSION: '0.0.0-test',
+  TRUST_PROXY: 'loopback',
+  REQUEST_TIMEOUT_MS: 12_000,
 };
 
 const baseDiscovery: OidcDiscovery = {
@@ -98,7 +101,7 @@ const noopKeycloak: KeycloakClient = {
 
 const buildHarness = async () => {
   const log = createLogger(env);
-  const redis = installCallShim(new IoRedisMock() as unknown as Redis);
+  const redis = installCallShim(new IoRedisMock());
   const metrics = buildMetrics();
   const internalJwtIssuer = await InternalJwtIssuer.create({
     alg: env.BFF_INTERNAL_JWT_ALG,
@@ -124,6 +127,7 @@ const buildHarness = async () => {
       authStateStore: new AuthStateStore(redis, env.AUTHSTATE_TTL_SECONDS),
       bffCodeStore: new BffCodeStore(redis, env.BFFCODE_TTL_SECONDS),
       sessionStore: new SessionStore(redis, env.SESSION_TTL_SECONDS),
+      userSessionsStore: new UserSessionsStore(redis, env.SESSION_TTL_SECONDS),
       internalJwtIssuer,
       metrics,
     },
@@ -150,7 +154,7 @@ describe('metrics — §3.1', () => {
 
   it('returns 404 for /metrics when METRICS_ENABLED=false', async () => {
     const log = createLogger(env);
-    const redis = installCallShim(new IoRedisMock() as unknown as Redis);
+    const redis = installCallShim(new IoRedisMock());
     const metrics = buildMetrics();
     const internalJwtIssuer = await InternalJwtIssuer.create({
       alg: env.BFF_INTERNAL_JWT_ALG,
@@ -176,6 +180,7 @@ describe('metrics — §3.1', () => {
         authStateStore: new AuthStateStore(redis, env.AUTHSTATE_TTL_SECONDS),
         bffCodeStore: new BffCodeStore(redis, env.BFFCODE_TTL_SECONDS),
         sessionStore: new SessionStore(redis, env.SESSION_TTL_SECONDS),
+        userSessionsStore: new UserSessionsStore(redis, env.SESSION_TTL_SECONDS),
         internalJwtIssuer,
         metrics,
       },

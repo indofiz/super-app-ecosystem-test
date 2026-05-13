@@ -33,7 +33,6 @@ class MockAuthRepository implements AuthRepository {
       accessToken: stored.accessToken,
       sessionId: stored.sessionId,
       expiresAt: stored.expiresAt,
-      idToken: stored.idToken,
     );
     _controller.add(session);
     return session;
@@ -46,13 +45,11 @@ class MockAuthRepository implements AuthRepository {
       accessToken: _fakeJwt(sub: 'mock-user-${_rng.nextInt(9999)}'),
       sessionId: _randomToken(32),
       expiresAt: DateTime.now().add(const Duration(minutes: 5)),
-      idToken: _fakeJwt(sub: 'mock-user'),
     );
     await secureStore.writeSession(
       accessToken: session.accessToken,
       sessionId: session.sessionId,
       expiresAt: session.expiresAt,
-      idToken: session.idToken,
     );
     _controller.add(session);
     return session;
@@ -67,13 +64,11 @@ class MockAuthRepository implements AuthRepository {
       accessToken: _fakeJwt(sub: 'mock-user-refreshed'),
       sessionId: stored.sessionId,
       expiresAt: DateTime.now().add(const Duration(minutes: 5)),
-      idToken: stored.idToken,
     );
     await secureStore.writeSession(
       accessToken: session.accessToken,
       sessionId: session.sessionId,
       expiresAt: session.expiresAt,
-      idToken: session.idToken,
     );
     _controller.add(session);
     return session;

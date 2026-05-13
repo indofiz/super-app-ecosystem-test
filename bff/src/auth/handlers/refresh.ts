@@ -1,15 +1,16 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
-import { badRequest, unauthorized } from '../../lib/errors.js';
+import { badRequestFromZod, unauthorized } from '../../lib/errors.js';
 import type { InternalJwtIssuer } from '../../lib/internalJwt.js';
 import { InvalidGrantError, type KeycloakClient } from '../../lib/keycloak.js';
 import {
   KeycloakJwtVerificationError,
+  verifyAndExtractProfile,
   type KeycloakJwtVerifier,
 } from '../../lib/keycloakJwt.js';
 import type { MetricsBundle } from '../../lib/metrics.js';
 import type { SessionStore } from '../stores/session.store.js';
-import { verifyAndExtractProfile } from './token.js';
+import type { UserSessionsStore } from '../stores/userSessions.store.js';
 
 const BodySchema = z.object({
   session_id: z.string().min(1),
@@ -18,6 +19,7 @@ const BodySchema = z.object({
 export const makeRefreshHandler = (deps: {
   keycloak: KeycloakClient;
   sessionStore: SessionStore;
+  userSessionsStore: UserSessionsStore;
   internalJwtIssuer: InternalJwtIssuer;
   keycloakJwtVerifier: KeycloakJwtVerifier;
   metrics?: MetricsBundle;
@@ -26,7 +28,7 @@ export const makeRefreshHandler = (deps: {
     try {
       const parsed = BodySchema.safeParse(req.body);
       if (!parsed.success) {
-        throw badRequest('invalid_request', parsed.error.issues[0]?.message ?? 'Invalid body');
+        throw badRequestFromZod(parsed.error, 'Invalid body');
       }
       // §2.1: bearer is required (router middleware) and its sid must match
       // the body session_id. Stops a leaked session_id from being usable
@@ -54,6 +56,7 @@ export const makeRefreshHandler = (deps: {
         // hammering KC with a dead token.
         if (err instanceof InvalidGrantError) {
           await deps.sessionStore.delete(parsed.data.session_id);
+          await deps.userSessionsStore.remove(session.sub, parsed.data.session_id);
           throw unauthorized('invalid_session', 'Upstream rejected refresh; session cleared');
         }
         throw err;
@@ -73,6 +76,7 @@ export const makeRefreshHandler = (deps: {
       } catch (err) {
         if (err instanceof KeycloakJwtVerificationError) {
           await deps.sessionStore.delete(parsed.data.session_id);
+          await deps.userSessionsStore.remove(session.sub, parsed.data.session_id);
           throw unauthorized(
             'invalid_session',
             'Upstream returned untrusted tokens; session cleared',
@@ -83,7 +87,7 @@ export const makeRefreshHandler = (deps: {
 
       // Refresh-token rotation: persist the new one if Keycloak issued it.
       const nextRefreshToken = tokens.refresh_token ?? session.refreshToken;
-      await deps.sessionStore.update(parsed.data.session_id, {
+      await deps.sessionStore.put(parsed.data.session_id, {
         ...session,
         refreshToken: nextRefreshToken,
         sub: extracted.sub,

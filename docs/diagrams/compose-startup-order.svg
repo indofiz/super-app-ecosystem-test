@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 800" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>docker-compose Startup Order</title>
+  <desc>Containers come up in waves gated by service_healthy. redis + sample-service start in parallel; bff waits for redis healthy; kong waits for sample-service started; nginx waits for both bff + kong healthy; nginx-exporter waits for nginx healthy. Each healthcheck is shown with its test command.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-healthy" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#15803d"/>
+    </marker>
+    <marker id="arrow-started" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .section-title { font-weight:700; font-size:15px; fill:#0f172a; }
+
+      .level-band  { fill:#f8fafc; stroke:#94a3b8; stroke-width:1; stroke-dasharray:4,4; rx:10; }
+      .level-label { font-weight:700; font-size:12px; fill:#475569; }
+
+      .box-edge   { fill:#f1f5f9; stroke:#334155; stroke-width:1.8; rx:10; }
+      .box-bff    { fill:#fef3c7; stroke:#b45309; stroke-width:1.8; rx:10; }
+      .box-kong   { fill:#dbeafe; stroke:#1d4ed8; stroke-width:1.8; rx:10; }
+      .box-svc    { fill:#dcfce7; stroke:#15803d; stroke-width:1.8; rx:10; }
+      .box-store  { fill:#ede9fe; stroke:#6d28d9; stroke-width:1.8; rx:10; }
+
+      .box-title  { font-weight:700; font-size:13px; fill:#0f172a; }
+      .box-sub    { font-size:11px; fill:#475569; }
+      .check-code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:10.5px; fill:#1f2937; }
+
+      .edge-healthy { stroke:#15803d; stroke-width:2; fill:none; }
+      .edge-started { stroke:#475569; stroke-width:2; fill:none; stroke-dasharray:5,4; }
+
+      .badge-health  { fill:#dcfce7; stroke:#15803d; rx:4; ry:4; }
+      .badge-no-health { fill:#fef9c3; stroke:#a16207; rx:4; ry:4; }
+      .badge-text { font-size:10.5px; font-weight:700; }
+
+      .note        { fill:#fef9c3; stroke:#a16207; stroke-width:1; rx:6; }
+      .note-text   { font-size:11px; fill:#713f12; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">docker-compose startup order — service_healthy gates</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">Without healthchecks, nginx can race ahead and 502 the first burst before Kong/BFF are actually serving. With them, dependents only start when traffic can flow.</text>
+
+  <!-- LEVEL 1 -->
+  <rect class="level-band" x="40" y="76" width="1000" height="140"/>
+  <text x="56" y="98" class="level-label">Level 1 — start immediately (no upstream dependencies)</text>
+
+  <rect class="box-store" x="160" y="116" width="240" height="80"/>
+  <text x="280" y="138" text-anchor="middle" class="box-title">redis</text>
+  <text x="280" y="154" text-anchor="middle" class="box-sub">redis:7-alpine, --appendonly yes</text>
+  <rect class="badge-health" x="172" y="166" width="100" height="22"/>
+  <text x="222" y="181" text-anchor="middle" class="badge-text" fill="#15803d">healthcheck</text>
+  <text x="280" y="184" class="check-code">redis-cli ping</text>
+
+  <rect class="box-svc" x="680" y="116" width="240" height="80"/>
+  <text x="800" y="138" text-anchor="middle" class="box-title">sample-service</text>
+  <text x="800" y="154" text-anchor="middle" class="box-sub">tiny Express; no DB; no deps</text>
+  <rect class="badge-no-health" x="692" y="166" width="120" height="22"/>
+  <text x="752" y="181" text-anchor="middle" class="badge-text" fill="#a16207">no healthcheck</text>
+  <text x="820" y="181" class="check-code">→ service_started only</text>
+
+  <!-- LEVEL 2 -->
+  <rect class="level-band" x="40" y="236" width="1000" height="160"/>
+  <text x="56" y="258" class="level-label">Level 2 — wait for L1</text>
+
+  <rect class="box-bff" x="160" y="276" width="240" height="100"/>
+  <text x="280" y="298" text-anchor="middle" class="box-title">bff</text>
+  <text x="280" y="314" text-anchor="middle" class="box-sub">Express; loads Redis; KC discovery</text>
+  <rect class="badge-health" x="172" y="326" width="100" height="22"/>
+  <text x="222" y="341" text-anchor="middle" class="badge-text" fill="#15803d">healthcheck</text>
+  <text x="280" y="344" class="check-code">wget -qO- http://localhost:3000/healthz</text>
+  <text x="280" y="362" class="check-code">  (cheap liveness; no I/O)</text>
+
+  <rect class="box-kong" x="680" y="276" width="240" height="100"/>
+  <text x="800" y="298" text-anchor="middle" class="box-title">kong</text>
+  <text x="800" y="314" text-anchor="middle" class="box-sub">DB-less; loads kong.yml + jwt_secrets</text>
+  <rect class="badge-health" x="692" y="326" width="100" height="22"/>
+  <text x="742" y="341" text-anchor="middle" class="badge-text" fill="#15803d">healthcheck</text>
+  <text x="800" y="344" class="check-code">kong health</text>
+  <text x="800" y="362" class="check-code">  (returns 0 after workers ready)</text>
+
+  <!-- Level 1 → Level 2 edges -->
+  <line x1="280" y1="196" x2="280" y2="274" class="edge-healthy" marker-end="url(#arrow-healthy)"/>
+  <text x="300" y="240" class="label-sub" fill="#15803d">redis: service_healthy</text>
+
+  <line x1="800" y1="196" x2="800" y2="274" class="edge-started" marker-end="url(#arrow-started)"/>
+  <text x="822" y="240" class="label-sub">sample-service: service_started</text>
+
+  <!-- LEVEL 3 -->
+  <rect class="level-band" x="40" y="416" width="1000" height="160"/>
+  <text x="56" y="438" class="level-label">Level 3 — wait for L2</text>
+
+  <rect class="box-edge" x="380" y="456" width="320" height="100"/>
+  <text x="540" y="478" text-anchor="middle" class="box-title">nginx</text>
+  <text x="540" y="494" text-anchor="middle" class="box-sub">edge proxy; templates rendered at start</text>
+  <rect class="badge-health" x="394" y="506" width="100" height="22"/>
+  <text x="444" y="521" text-anchor="middle" class="badge-text" fill="#15803d">healthcheck</text>
+  <text x="540" y="524" class="check-code">wget -qO- http://localhost/readyz</text>
+  <text x="540" y="542" class="check-code">  (proxies through to BFF + Redis + KC)</text>
+
+  <!-- L2 → L3 edges -->
+  <line x1="280" y1="376" x2="440" y2="454" class="edge-healthy" marker-end="url(#arrow-healthy)"/>
+  <text x="320" y="416" class="label-sub" fill="#15803d">bff: service_healthy</text>
+
+  <line x1="800" y1="376" x2="640" y2="454" class="edge-healthy" marker-end="url(#arrow-healthy)"/>
+  <text x="688" y="416" class="label-sub" fill="#15803d">kong: service_healthy</text>
+
+  <!-- LEVEL 4 -->
+  <rect class="level-band" x="40" y="596" width="1000" height="120"/>
+  <text x="56" y="618" class="level-label">Level 4 — wait for L3 (observability)</text>
+
+  <rect class="box-edge" x="380" y="636" width="320" height="60"/>
+  <text x="540" y="658" text-anchor="middle" class="box-title">nginx-exporter</text>
+  <text x="540" y="674" text-anchor="middle" class="box-sub">scrapes nginx :8081 stub_status</text>
+  <text x="540" y="688" class="check-code">restart: unless-stopped</text>
+
+  <!-- L3 → L4 edge -->
+  <line x1="540" y1="556" x2="540" y2="634" class="edge-healthy" marker-end="url(#arrow-healthy)"/>
+  <text x="560" y="596" class="label-sub" fill="#15803d">nginx: service_healthy</text>
+
+  <!-- Legend / footer -->
+  <g transform="translate(40,736)">
+    <rect class="note" x="0" y="0" width="1000" height="58"/>
+    <text x="14" y="20" class="note-text"><tspan font-weight="700">service_healthy</tspan> — Compose waits for the named container's healthcheck to return 0 before starting this one. The bff/kong/nginx checks are READINESS probes, not just liveness.</text>
+    <text x="14" y="36" class="note-text"><tspan font-weight="700">service_started</tspan> — Compose only waits for the container to exist. Used for sample-service because it has no healthcheck — adding one is straightforward if upstream changes flake.</text>
+    <text x="14" y="52" class="note-text"><tspan font-weight="700">start_period</tspan> on each check absorbs slow first-boot states (Kong takes ~15s, BFF ~10s) so the early failures don't burn the retry budget.</text>
+  </g>
+</svg>

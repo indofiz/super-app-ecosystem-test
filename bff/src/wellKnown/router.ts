@@ -10,6 +10,9 @@ export const buildWellKnownRouter = (issuer: InternalJwtIssuer): Router => {
   // debugging tokens at jwt.io and for any downstream service that prefers
   // JWKS-based verification over a baked-in PEM.
   router.get('/.well-known/jwks.json', (_req, res) => {
+    // AUDIT #26: 300s cache matches the documented kid-rotation overlap.
+    // If a CDN ever fronts this route, swap to `public, max-age=300,
+    // s-maxage=300, must-revalidate` so revalidation occurs at the edge.
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.json(issuer.getJwks());
   });

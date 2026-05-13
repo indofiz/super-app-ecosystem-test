@@ -6,6 +6,7 @@ import { createApp } from '../src/app.js';
 import { AuthStateStore } from '../src/auth/stores/authState.store.js';
 import { BffCodeStore, type BffCodeRecord } from '../src/auth/stores/bffCode.store.js';
 import { SessionStore } from '../src/auth/stores/session.store.js';
+import { UserSessionsStore } from '../src/auth/stores/userSessions.store.js';
 import type { Env } from '../src/config/env.js';
 import { InternalJwtIssuer } from '../src/lib/internalJwt.js';
 import {
@@ -66,6 +67,8 @@ const env: Env = {
   OTEL_SERVICE_NAME: 'super-app-bff',
   BUILD_COMMIT: 'test',
   BUILD_VERSION: '0.0.0-test',
+  TRUST_PROXY: 'loopback',
+  REQUEST_TIMEOUT_MS: 12_000,
 };
 
 // Generate the internal-JWT keypair the same way auth.flow.test.ts does.
@@ -158,7 +161,7 @@ const installCallShim = (mock: Redis): Redis => {
 
 const buildHarness = async (kcOpts: FakeKcOpts = {}) => {
   const log = createLogger(env);
-  const redis = installCallShim(new IoRedisMock() as unknown as Redis);
+  const redis = installCallShim(new IoRedisMock());
   const metrics = buildMetrics();
   const { client: keycloak, calls } = await buildFakeKc(kcOpts);
   const internalJwtIssuer = await InternalJwtIssuer.create({
@@ -185,6 +188,7 @@ const buildHarness = async (kcOpts: FakeKcOpts = {}) => {
       authStateStore: new AuthStateStore(redis, env.AUTHSTATE_TTL_SECONDS),
       bffCodeStore: new BffCodeStore(redis, env.BFFCODE_TTL_SECONDS),
       sessionStore: new SessionStore(redis, env.SESSION_TTL_SECONDS),
+      userSessionsStore: new UserSessionsStore(redis, env.SESSION_TTL_SECONDS),
       internalJwtIssuer,
       metrics,
     },
@@ -348,7 +352,7 @@ describe('Keycloak JWT verifier — §2.3 end-to-end via handlers', () => {
     const key = `bffcode:${bffAuthCode}`;
     const raw = await redis.get(key);
     expect(raw).not.toBeNull();
-    const record: BffCodeRecord = JSON.parse(raw!);
+    const record: BffCodeRecord = JSON.parse(raw);
     record.idToken = await signKcIdToken('attacker-sub', {}, { withRogueKey: true });
     record.accessToken = await signKcAccessToken('attacker-sub', ['admin'], {
       withRogueKey: true,
@@ -414,6 +418,7 @@ describe('Keycloak JWT verifier — §2.3 end-to-end via handlers', () => {
         authStateStore: new AuthStateStore(goodLogin.redis, env.AUTHSTATE_TTL_SECONDS),
         bffCodeStore: new BffCodeStore(goodLogin.redis, env.BFFCODE_TTL_SECONDS),
         sessionStore: new SessionStore(goodLogin.redis, env.SESSION_TTL_SECONDS),
+        userSessionsStore: new UserSessionsStore(goodLogin.redis, env.SESSION_TTL_SECONDS),
         internalJwtIssuer: goodLogin.internalJwtIssuer,
         metrics,
       },

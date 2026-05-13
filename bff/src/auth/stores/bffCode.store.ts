@@ -1,33 +1,24 @@
 import type { Redis } from 'ioredis';
+import { z } from 'zod';
+import { RedisJsonStore } from './redisJson.store.js';
 
-export interface BffCodeRecord {
-  accessToken: string;
-  refreshToken?: string;
-  idToken?: string;
-  tokenType: string;
-  expiresIn: number;
-  scope?: string;
-  sub?: string;
-  appCodeChallenge: string;
-  appRedirectUri: string;
-  appClientId: string;
-}
+export const BffCodeRecordZ = z.object({
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1).optional(),
+  idToken: z.string().min(1).optional(),
+  tokenType: z.string().min(1),
+  expiresIn: z.number().int().nonnegative(),
+  scope: z.string().optional(),
+  sub: z.string().optional(),
+  appCodeChallenge: z.string().min(1),
+  appRedirectUri: z.string().min(1),
+  appClientId: z.string().min(1),
+});
 
-const key = (code: string) => `bffcode:${code}`;
+export type BffCodeRecord = z.infer<typeof BffCodeRecordZ>;
 
-export class BffCodeStore {
-  constructor(
-    private readonly redis: Redis,
-    private readonly ttlSeconds: number,
-  ) {}
-
-  async put(code: string, record: BffCodeRecord): Promise<void> {
-    await this.redis.set(key(code), JSON.stringify(record), 'EX', this.ttlSeconds);
-  }
-
-  /** Atomic get + delete (single-use). */
-  async take(code: string): Promise<BffCodeRecord | null> {
-    const raw = await this.redis.getdel(key(code));
-    return raw ? (JSON.parse(raw) as BffCodeRecord) : null;
+export class BffCodeStore extends RedisJsonStore<BffCodeRecord> {
+  constructor(redis: Redis, ttlSeconds: number) {
+    super(redis, 'bffcode', ttlSeconds, BffCodeRecordZ);
   }
 }

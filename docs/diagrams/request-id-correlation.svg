@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 760" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>X-Request-Id Correlation</title>
+  <desc>nginx is the chain origin. proxy_set_header X-Request-Id $request_id OVERWRITES any client value, so log poisoning is impossible. Every downstream component (Kong, BFF, service) reuses the same id. echo_downstream=true returns the same id to the client for support tickets.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+    <style>
+      .label-title   { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub     { font-size:11px; fill:#475569; }
+      .section-title { font-weight:700; font-size:15px; fill:#0f172a; }
+
+      .box-edge   { fill:#f1f5f9; stroke:#334155; stroke-width:1.5; rx:10; }
+      .box-bff    { fill:#fef3c7; stroke:#b45309; stroke-width:1.5; rx:10; }
+      .box-kong   { fill:#dbeafe; stroke:#1d4ed8; stroke-width:1.5; rx:10; }
+      .box-svc    { fill:#dcfce7; stroke:#15803d; stroke-width:1.5; rx:10; }
+      .box-mobile { fill:#f0f9ff; stroke:#0369a1; stroke-width:1.5; rx:10; }
+
+      .msg-data   { stroke:#1d4ed8; stroke-width:2; fill:none; }
+      .msg-back   { stroke:#475569; stroke-width:2; fill:none; stroke-dasharray:6,4; }
+      .msg-label  { font-size:11px; fill:#1f2937; }
+
+      .req-id-poison { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#9f1239; text-decoration:line-through; }
+      .req-id-trusted { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#1d4ed8; font-weight:700; }
+      .req-id-bad    { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#9f1239; }
+      .req-id-good   { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#15803d; font-weight:700; }
+
+      .note       { fill:#fef9c3; stroke:#a16207; stroke-width:1; rx:6; }
+      .note-text  { font-size:11px; fill:#713f12; }
+
+      .log-row    { fill:#f8fafc; stroke:#cbd5e1; stroke-width:1; rx:6; }
+      .log-tag    { font-weight:700; font-size:11px; }
+      .log-line   { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:10.5px; fill:#1f2937; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">X-Request-Id Correlation — one id per request, end to end</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">nginx mints. Everyone downstream reuses. Client cannot poison logs by sending a chosen value.</text>
+
+  <!-- SECTION 1: Request path -->
+  <text x="60" y="80" class="section-title">1. Request path — what each hop does with X-Request-Id</text>
+
+  <!-- Boxes for each component -->
+  <rect class="box-mobile" x="40"  y="100" width="140" height="60"/>
+  <text x="110" y="124" text-anchor="middle" class="label-title">Mobile</text>
+  <text x="110" y="142" text-anchor="middle" class="label-sub">client (Dio)</text>
+
+  <rect class="box-edge"  x="240" y="100" width="160" height="60"/>
+  <text x="320" y="124" text-anchor="middle" class="label-title">nginx</text>
+  <text x="320" y="142" text-anchor="middle" class="label-sub">chain origin</text>
+
+  <rect class="box-kong"  x="460" y="100" width="160" height="60"/>
+  <text x="540" y="124" text-anchor="middle" class="label-title">Kong</text>
+  <text x="540" y="142" text-anchor="middle" class="label-sub">correlation-id plugin</text>
+
+  <rect class="box-svc"   x="680" y="100" width="160" height="60"/>
+  <text x="760" y="124" text-anchor="middle" class="label-title">sample-service</text>
+  <text x="760" y="142" text-anchor="middle" class="label-sub">reads from header</text>
+
+  <rect class="box-bff"   x="880" y="100" width="160" height="60"/>
+  <text x="960" y="124" text-anchor="middle" class="label-title">BFF (alt path)</text>
+  <text x="960" y="142" text-anchor="middle" class="label-sub">/auth/* — pino + ALS</text>
+
+  <!-- Header values between components -->
+  <line x1="180" y1="130" x2="238" y2="130" class="msg-data" marker-end="url(#arrow-data)"/>
+  <text x="209" y="120" text-anchor="middle" class="req-id-poison">"&lt;script&gt;hax&lt;/script&gt;"</text>
+  <text x="209" y="156" text-anchor="middle" class="label-sub">caller value</text>
+
+  <line x1="400" y1="130" x2="458" y2="130" class="msg-data" marker-end="url(#arrow-data)"/>
+  <text x="429" y="120" text-anchor="middle" class="req-id-trusted">8a7b6c5d-...</text>
+  <text x="429" y="156" text-anchor="middle" class="label-sub">overwritten</text>
+
+  <line x1="620" y1="130" x2="678" y2="130" class="msg-data" marker-end="url(#arrow-data)"/>
+  <text x="649" y="120" text-anchor="middle" class="req-id-trusted">8a7b6c5d-...</text>
+  <text x="649" y="156" text-anchor="middle" class="label-sub">reused</text>
+
+  <line x1="840" y1="130" x2="878" y2="130" class="msg-back" marker-end="url(#arrow)"/>
+  <text x="860" y="120" text-anchor="middle" class="label-sub">(via nginx)</text>
+
+  <!-- Per-component annotations underneath -->
+  <g transform="translate(40,180)">
+    <rect class="note" x="0" y="0" width="140" height="84"/>
+    <text x="70" y="20" text-anchor="middle" class="note-text" font-weight="700">Mobile</text>
+    <text x="70" y="38" text-anchor="middle" class="note-text">may or may not</text>
+    <text x="70" y="52" text-anchor="middle" class="note-text">send X-Request-Id</text>
+    <text x="70" y="68" text-anchor="middle" class="note-text">— either way it loses</text>
+    <text x="70" y="78" text-anchor="middle" class="note-text" fill="#9f1239">to nginx's overwrite</text>
+  </g>
+
+  <g transform="translate(240,180)">
+    <rect class="note" x="0" y="0" width="160" height="84"/>
+    <text x="80" y="20" text-anchor="middle" class="note-text" font-weight="700">nginx</text>
+    <text x="80" y="38" text-anchor="middle" class="note-text">$request_id = 32 hex chars</text>
+    <text x="80" y="52" text-anchor="middle" class="note-text">proxy_set_header</text>
+    <text x="80" y="66" text-anchor="middle" class="note-text">  X-Request-Id $request_id;</text>
+    <text x="80" y="80" text-anchor="middle" class="note-text" fill="#15803d">always SET, never read</text>
+  </g>
+
+  <g transform="translate(460,180)">
+    <rect class="note" x="0" y="0" width="160" height="84"/>
+    <text x="80" y="20" text-anchor="middle" class="note-text" font-weight="700">Kong correlation-id</text>
+    <text x="80" y="38" text-anchor="middle" class="note-text">if header present → REUSE</text>
+    <text x="80" y="52" text-anchor="middle" class="note-text">if missing → generate uuid</text>
+    <text x="80" y="68" text-anchor="middle" class="note-text">echo_downstream: true</text>
+    <text x="80" y="80" text-anchor="middle" class="note-text">  → echoes to client</text>
+  </g>
+
+  <g transform="translate(680,180)">
+    <rect class="note" x="0" y="0" width="160" height="84"/>
+    <text x="80" y="20" text-anchor="middle" class="note-text" font-weight="700">service</text>
+    <text x="80" y="38" text-anchor="middle" class="note-text">req.headers['x-request-id']</text>
+    <text x="80" y="52" text-anchor="middle" class="note-text">echoed in response JSON</text>
+    <text x="80" y="68" text-anchor="middle" class="note-text">used as log correlator</text>
+    <text x="80" y="80" text-anchor="middle" class="note-text">across structured logs</text>
+  </g>
+
+  <g transform="translate(880,180)">
+    <rect class="note" x="0" y="0" width="160" height="84"/>
+    <text x="80" y="20" text-anchor="middle" class="note-text" font-weight="700">BFF (auth path)</text>
+    <text x="80" y="38" text-anchor="middle" class="note-text">requestIdMiddleware</text>
+    <text x="80" y="52" text-anchor="middle" class="note-text">+ AsyncLocalStorage (ALS)</text>
+    <text x="80" y="66" text-anchor="middle" class="note-text">pino http logger picks up</text>
+    <text x="80" y="80" text-anchor="middle" class="note-text">→ stamps every line</text>
+  </g>
+
+  <!-- SECTION 2: Same id appears in every log -->
+  <text x="60" y="304" class="section-title">2. Same id everywhere — example log lines for one request</text>
+
+  <g transform="translate(40,320)">
+    <rect class="log-row" x="0" y="0" width="1000" height="40"/>
+    <text x="14" y="24" class="log-tag" fill="#334155">nginx</text>
+    <text x="80" y="24" class="log-line">{"time":"...","method":"GET","uri":"/api/profile","status":200,"request_id":"8a7b6c5d-...","upstream":"kong:8000","rt":0.012}</text>
+  </g>
+
+  <g transform="translate(40,368)">
+    <rect class="log-row" x="0" y="0" width="1000" height="40"/>
+    <text x="14" y="24" class="log-tag" fill="#1d4ed8">Kong</text>
+    <text x="80" y="24" class="log-line">{"started_at":...,"latencies":{...},"service":"sample-service","request":{"headers":{"x-request-id":"8a7b6c5d-..."}},"response":{"status":200}}</text>
+  </g>
+
+  <g transform="translate(40,416)">
+    <rect class="log-row" x="0" y="0" width="1000" height="40"/>
+    <text x="14" y="24" class="log-tag" fill="#15803d">service</text>
+    <text x="80" y="24" class="log-line">{"level":30,"msg":"hit /","sub":"f47ac10b-...","requestId":"8a7b6c5d-...","ts":"..."}</text>
+  </g>
+
+  <g transform="translate(40,464)">
+    <rect class="log-row" x="0" y="0" width="1000" height="40"/>
+    <text x="14" y="24" class="log-tag" fill="#b45309">BFF</text>
+    <text x="80" y="24" class="log-line">{"level":30,"msg":"req completed","req":{"id":"8a7b6c5d-...","method":"POST","url":"/auth/refresh"},"res":{"statusCode":200}}</text>
+  </g>
+
+  <!-- SECTION 3: Response echo -->
+  <text x="60" y="540" class="section-title">3. Echo back to the client — support-ticket-friendly</text>
+
+  <g transform="translate(40,560)">
+    <rect class="log-row" x="0" y="0" width="1000" height="64"/>
+    <text x="14" y="22" class="log-line">HTTP/1.1 200 OK</text>
+    <text x="14" y="36" class="log-line">Content-Type: application/json</text>
+    <text x="14" y="50" class="log-line" fill="#1d4ed8" font-weight="700">X-Request-Id: 8a7b6c5d-...</text>
+    <text x="14" y="64" class="log-line">{"service":"sample-service","requestId":"8a7b6c5d-...", ...}</text>
+  </g>
+
+  <!-- Footer note -->
+  <g transform="translate(40,640)">
+    <rect class="note" x="0" y="0" width="1000" height="100"/>
+    <text x="14" y="22" class="note-text" font-weight="700">Why nginx-level overwrite (and not "trust the client")</text>
+    <text x="14" y="42" class="note-text">• Defends logs from injection: a client sending X-Request-Id: "&lt;script&gt;..." would otherwise show up in structured log values that downstream tooling renders to HTML.</text>
+    <text x="14" y="58" class="note-text">• Defends against log-collision attacks: a client choosing the request_id of another user's known support ticket could otherwise stitch unrelated logs together.</text>
+    <text x="14" y="74" class="note-text">• Defends against cardinality blowup: a client could otherwise generate a unique id per request and break Prometheus label cardinality.</text>
+    <text x="14" y="90" class="note-text">Once nginx mints, every component down the chain just reads the header — no library has to mint or merge ids. Single source of truth.</text>
+  </g>
+</svg>

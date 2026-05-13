@@ -1,0 +1,30 @@
+# Dev-only overrides — auto-merged on top of docker-compose.yml by
+# `docker compose up` (no `-f` needed). On the VPS, .env sets
+# COMPOSE_FILE=docker-compose.yml (see .env.prod.example), which makes
+# Compose skip this file entirely. Do not put anything prod-critical here.
+#
+# What this file adds in dev:
+#   - Host ports for redis (6379), bff (3000), and sample-service (3001)
+#     so you can poke each component directly with redis-cli / curl
+#     without going through nginx.
+#
+# It does NOT change images, healthchecks, depends_on, security_opt, or
+# any audit-flagged config — those stay in docker-compose.yml so dev and
+# prod behave the same on the request path.
+
+services:
+  redis:
+    ports:
+      - "6379:6379"
+
+  bff:
+    # nginx still routes to bff via the docker network; this just lets you
+    # `curl http://localhost:3000/healthz` from the host for debugging.
+    ports:
+      - "3000:3000"
+
+  sample-service:
+    # Lets you `curl http://localhost:3001/` to bypass Kong while debugging
+    # the service itself. Kong still talks to it via the docker network.
+    ports:
+      - "3001:3001"

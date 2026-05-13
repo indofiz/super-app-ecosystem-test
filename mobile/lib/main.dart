@@ -3,6 +3,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'app.dart';
 import 'core/config/app_config.dart';
+import 'core/http/api_client.dart';
 import 'core/storage/secure_store.dart';
 import 'features/auth/data/auth_repository_factory.dart';
 
@@ -16,9 +17,17 @@ Future<void> main() async {
     config: config,
     secureStore: secureStore,
   );
+  // ApiClient subscribes to sessionChanges; the bloc's AuthStarted event
+  // emits the restored session on that stream, so the client picks up the
+  // bearer before the first /api/* call.
+  final apiClient = ApiClient.create(
+    config: config,
+    authRepository: authRepository,
+  );
 
   runApp(SmartApp(
     config: config,
     authRepository: authRepository,
+    apiClient: apiClient,
   ));
 }

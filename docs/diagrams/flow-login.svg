@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 920" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>Login Flow — mobile/AppAuth → BFF → Keycloak → BFF</title>
+  <desc>Double-PKCE OAuth ceremony. The app's PKCE pair (APPCH/APPCV) protects the mobile→BFF leg. The BFF's PKCE pair (BFFCH/BFFCV) protects the BFF→Keycloak leg. The BFF mints an internal RS256 JWT only after verifying both PKCE proofs and Keycloak's id_token signature.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-auth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+    <marker id="arrow-store" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6d28d9"/>
+    </marker>
+    <style>
+      .box { fill:#ffffff; stroke:#334155; stroke-width:1.5; rx:10; }
+      .box-edge   { fill:#f1f5f9; stroke:#334155; }
+      .box-bff    { fill:#fef3c7; stroke:#b45309; }
+      .box-ext    { fill:#fde2e7; stroke:#9f1239; stroke-dasharray:6,4; }
+      .box-store  { fill:#ede9fe; stroke:#6d28d9; }
+      .box-mobile { fill:#f0f9ff; stroke:#0369a1; }
+
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .lifeline    { stroke:#94a3b8; stroke-width:1; stroke-dasharray:3,4; }
+
+      .msg-auth   { stroke:#b45309; stroke-width:1.8; fill:none; }
+      .msg-store  { stroke:#6d28d9; stroke-width:1.8; fill:none; }
+      .msg-soft   { stroke:#475569; stroke-width:1.5; fill:none; stroke-dasharray:5,4; }
+      .msg-label  { font-size:11px; fill:#1f2937; }
+      .note       { fill:#fef9c3; stroke:#a16207; stroke-width:1; rx:6; }
+      .note-text  { font-size:11px; fill:#713f12; }
+      .step-bg    { fill:#0f172a; }
+      .step-num   { fill:#ffffff; font-weight:700; font-size:10px; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">Login Flow — Double-PKCE OAuth via BFF</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">Mobile never sees Keycloak's access / refresh / id token. It receives only the BFF-minted internal JWT and a session_id.</text>
+
+  <!-- Actor boxes -->
+  <rect class="box box-mobile" x="60"  y="80" width="140" height="56"/>
+  <text x="130" y="105" text-anchor="middle" class="label-title">Mobile</text>
+  <text x="130" y="123" text-anchor="middle" class="label-sub">Flutter / AppAuth</text>
+
+  <rect class="box box-bff" x="340" y="80" width="160" height="56"/>
+  <text x="420" y="105" text-anchor="middle" class="label-title">BFF</text>
+  <text x="420" y="123" text-anchor="middle" class="label-sub">Express / TS</text>
+
+  <rect class="box box-ext" x="640" y="80" width="180" height="56"/>
+  <text x="730" y="105" text-anchor="middle" class="label-title">Keycloak (SSO)</text>
+  <text x="730" y="123" text-anchor="middle" class="label-sub">EXTERNAL</text>
+
+  <rect class="box box-store" x="880" y="80" width="140" height="56"/>
+  <text x="950" y="105" text-anchor="middle" class="label-title">Redis</text>
+  <text x="950" y="123" text-anchor="middle" class="label-sub">session store</text>
+
+  <!-- Lifelines -->
+  <line x1="130" y1="140" x2="130" y2="860" class="lifeline"/>
+  <line x1="420" y1="140" x2="420" y2="860" class="lifeline"/>
+  <line x1="730" y1="140" x2="730" y2="860" class="lifeline"/>
+  <line x1="950" y1="140" x2="950" y2="860" class="lifeline"/>
+
+  <!-- Step badges helper (cx, cy, n) -->
+  <!-- Step 1: Mobile -> BFF -->
+  <line x1="130" y1="180" x2="418" y2="180" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="146" cy="174" r="9" class="step-bg"/><text x="146" y="178" text-anchor="middle" class="step-num">1</text>
+  <text x="274" y="174" text-anchor="middle" class="msg-label">GET /auth/authorize?client_id&amp;redirect_uri&amp;code_challenge=APPCH&amp;state=APPS  (via nginx)</text>
+
+  <!-- Step 2: BFF -> Redis -->
+  <line x1="420" y1="220" x2="948" y2="220" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="436" cy="214" r="9" class="step-bg"/><text x="436" y="218" text-anchor="middle" class="step-num">2</text>
+  <text x="684" y="214" text-anchor="middle" class="msg-label" fill="#6d28d9">PUT authstate:BFFS = { APPCH, APPS, redirect_uri, BFFCV }   (TTL 10m, single-use)</text>
+
+  <!-- Step 3: BFF -> Mobile (302) -->
+  <line x1="418" y1="260" x2="132" y2="260" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="404" cy="254" r="9" class="step-bg"/><text x="404" y="258" text-anchor="middle" class="step-num">3</text>
+  <text x="274" y="254" text-anchor="middle" class="msg-label">302 → KC /auth?state=BFFS&amp;code_challenge=BFFCH (BFF PKCE) &amp;client_id=super-app-bff</text>
+
+  <!-- Step 4: Mobile -> KC (browser) -->
+  <line x1="130" y1="300" x2="728" y2="300" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="146" cy="294" r="9" class="step-bg"/><text x="146" y="298" text-anchor="middle" class="step-num">4</text>
+  <text x="429" y="294" text-anchor="middle" class="msg-label">Browser hits Keycloak → user signs in (username / password / MFA)</text>
+
+  <!-- Step 5: KC -> Mobile (302) -->
+  <line x1="728" y1="340" x2="132" y2="340" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="714" cy="334" r="9" class="step-bg"/><text x="714" y="338" text-anchor="middle" class="step-num">5</text>
+  <text x="429" y="334" text-anchor="middle" class="msg-label">302 → ${PUBLIC_BASE_URL}/auth/callback?code=KCCODE&amp;state=BFFS</text>
+
+  <!-- Step 6: Mobile -> BFF -->
+  <line x1="130" y1="380" x2="418" y2="380" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="146" cy="374" r="9" class="step-bg"/><text x="146" y="378" text-anchor="middle" class="step-num">6</text>
+  <text x="274" y="374" text-anchor="middle" class="msg-label">GET /auth/callback?code=KCCODE&amp;state=BFFS  (via nginx)</text>
+
+  <!-- Step 7: BFF -> Redis GETDEL authstate -->
+  <line x1="420" y1="420" x2="948" y2="420" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="436" cy="414" r="9" class="step-bg"/><text x="436" y="418" text-anchor="middle" class="step-num">7</text>
+  <text x="684" y="414" text-anchor="middle" class="msg-label" fill="#6d28d9">GETDEL authstate:BFFS  → recover BFFCV (atomic, single-use)</text>
+
+  <!-- Step 8: BFF -> KC POST /token -->
+  <line x1="420" y1="460" x2="728" y2="460" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="436" cy="454" r="9" class="step-bg"/><text x="436" y="458" text-anchor="middle" class="step-num">8</text>
+  <text x="574" y="454" text-anchor="middle" class="msg-label">POST /token  grant=authorization_code, code_verifier=BFFCV, client_secret</text>
+
+  <!-- Step 9: KC -> BFF tokens -->
+  <line x1="728" y1="500" x2="422" y2="500" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="714" cy="494" r="9" class="step-bg"/><text x="714" y="498" text-anchor="middle" class="step-num">9</text>
+  <text x="575" y="494" text-anchor="middle" class="msg-label">{ access_token, refresh_token, id_token }   ← BFF verifies id_token via KC JWKS</text>
+
+  <!-- Step 10: BFF -> Redis bffcode -->
+  <line x1="420" y1="540" x2="948" y2="540" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="436" cy="534" r="9" class="step-bg"/><text x="436" y="538" text-anchor="middle" class="step-num">10</text>
+  <text x="684" y="534" text-anchor="middle" class="msg-label" fill="#6d28d9">PUT bffcode:BFFCODE = { tokens, sub, APPCH, redirect_uri }   (TTL 5m, single-use)</text>
+
+  <!-- Step 11: BFF -> Mobile (302) -->
+  <line x1="418" y1="580" x2="132" y2="580" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="404" cy="574" r="9" class="step-bg"/><text x="404" y="578" text-anchor="middle" class="step-num">11</text>
+  <text x="274" y="574" text-anchor="middle" class="msg-label">302 → deeplink (app)?code=BFFCODE&amp;state=APPS</text>
+
+  <!-- Step 12: Mobile -> BFF POST /token -->
+  <line x1="130" y1="620" x2="418" y2="620" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="146" cy="614" r="9" class="step-bg"/><text x="146" y="618" text-anchor="middle" class="step-num">12</text>
+  <text x="274" y="614" text-anchor="middle" class="msg-label">POST /auth/token { code=BFFCODE, code_verifier=APPCV, client_id, redirect_uri }</text>
+
+  <!-- Step 13: BFF -> Redis GETDEL bffcode + PUT session -->
+  <line x1="420" y1="660" x2="948" y2="660" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="436" cy="654" r="9" class="step-bg"/><text x="436" y="658" text-anchor="middle" class="step-num">13</text>
+  <text x="684" y="654" text-anchor="middle" class="msg-label" fill="#6d28d9">GETDEL bffcode:BFFCODE   then   PUT session:SID = { refresh_token, sub, profile }  (TTL 30d)</text>
+
+  <!-- Step 14: BFF -> Mobile (200) -->
+  <line x1="418" y1="720" x2="132" y2="720" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="404" cy="714" r="9" class="step-bg"/><text x="404" y="718" text-anchor="middle" class="step-num">14</text>
+  <text x="274" y="714" text-anchor="middle" class="msg-label">200  { access_token = INTERNAL_JWT (RS256), token_type, expires_in=300, session_id }</text>
+
+  <!-- BFF self-note: verify PKCE + mint JWT (sits between 12 and 13) -->
+  <rect class="note" x="350" y="680" width="160" height="30"/>
+  <text x="430" y="699" text-anchor="middle" class="note-text">verify APPCV ↔ APPCH</text>
+
+  <!-- BFF self-note: KC token verification (between 9 and 10) -->
+  <rect class="note" x="350" y="510" width="160" height="22"/>
+  <text x="430" y="525" text-anchor="middle" class="note-text">verify id_token via JWKS</text>
+
+  <!-- Footer notes -->
+  <g transform="translate(60,790)">
+    <rect class="box" x="0" y="0" width="960" height="100" rx="10" fill="#f8fafc"/>
+    <text x="14" y="20" class="label-title">Why two PKCE pairs?</text>
+    <text x="14" y="40" class="label-sub">• APPCH/APPCV — bound to the mobile app. Stops a stolen BFFCODE from being redeemed by any client other than the original app.</text>
+    <text x="14" y="58" class="label-sub">• BFFCH/BFFCV — bound to this BFF instance. Stops a stolen KCCODE from being redeemed by any other server that lands the same callback.</text>
+    <text x="14" y="78" class="label-sub">All stores use single-use GETDEL. authstate &amp; bffcode TTLs short-circuit replay. Internal JWT is RS256 — Kong holds only the public PEM.</text>
+  </g>
+</svg>

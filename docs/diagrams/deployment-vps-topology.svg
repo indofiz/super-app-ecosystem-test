@@ -1,0 +1,210 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 820" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>Single-VPS Deployment Topology</title>
+  <desc>One Ubuntu LTS VPS, six Docker containers on one bridge network. Only nginx publishes host ports (80, 443). UFW closes everything else. External Keycloak and Let's Encrypt are reached via outbound 443.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+    <marker id="arrow-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#9f1239"/>
+    </marker>
+    <style>
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .section-title { font-weight:700; font-size:15px; fill:#0f172a; }
+
+      .vps-band    { fill:#f8fafc; stroke:#0f172a; stroke-width:2; rx:14; }
+      .docker-band { fill:#eef2ff; stroke:#4338ca; stroke-width:1.5; stroke-dasharray:6,4; rx:12; }
+      .volume-band { fill:#faf5ff; stroke:#6d28d9; stroke-width:1; stroke-dasharray:4,3; rx:8; }
+      .internet    { fill:#fef9c3; stroke:#a16207; stroke-width:1.5; rx:12; }
+
+      .box-edge   { fill:#f1f5f9; stroke:#334155; stroke-width:1.5; rx:8; }
+      .box-bff    { fill:#fef3c7; stroke:#b45309; stroke-width:1.5; rx:8; }
+      .box-kong   { fill:#dbeafe; stroke:#1d4ed8; stroke-width:1.5; rx:8; }
+      .box-svc    { fill:#dcfce7; stroke:#15803d; stroke-width:1.5; rx:8; }
+      .box-store  { fill:#ede9fe; stroke:#6d28d9; stroke-width:1.5; rx:8; }
+      .box-mobile { fill:#f0f9ff; stroke:#0369a1; stroke-width:1.5; rx:8; }
+      .box-ext    { fill:#fde2e7; stroke:#9f1239; stroke-width:1.5; stroke-dasharray:5,4; rx:8; }
+
+      .box-title  { font-weight:700; font-size:12px; fill:#0f172a; }
+      .box-sub    { font-size:10.5px; fill:#475569; }
+
+      .port-pill  { rx:6; ry:6; }
+      .port-public { fill:#fee2e2; stroke:#b91c1c; }
+      .port-internal { fill:#dcfce7; stroke:#15803d; }
+      .port-text  { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:10.5px; }
+
+      .edge        { stroke:#475569; stroke-width:1.5; fill:none; }
+      .edge-data   { stroke:#1d4ed8; stroke-width:1.8; fill:none; }
+      .edge-out    { stroke:#9f1239; stroke-width:1.8; fill:none; stroke-dasharray:5,4; }
+      .edge-volume { stroke:#6d28d9; stroke-width:1.5; fill:none; stroke-dasharray:3,3; }
+
+      .label-bad   { font-size:10.5px; fill:#9f1239; font-weight:700; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">Single-VPS Deployment Topology</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">Six containers on one bridge network. Only nginx publishes host ports. UFW deny-by-default + outbound 443 only to Keycloak / Let's Encrypt.</text>
+
+  <!-- Internet zone -->
+  <rect class="internet" x="40" y="80" width="1000" height="180"/>
+  <text x="56" y="102" class="section-title" fill="#a16207">Internet</text>
+
+  <!-- Mobile -->
+  <rect class="box-mobile" x="60" y="120" width="160" height="60"/>
+  <text x="140" y="142" text-anchor="middle" class="box-title">Mobile users</text>
+  <text x="140" y="158" text-anchor="middle" class="box-sub">Flutter app</text>
+  <text x="140" y="172" text-anchor="middle" class="box-sub">HTTPS only</text>
+
+  <!-- DNS -->
+  <rect class="internet" x="240" y="120" width="160" height="60" stroke-dasharray="5,4"/>
+  <text x="320" y="142" text-anchor="middle" class="box-title">DNS</text>
+  <text x="320" y="158" text-anchor="middle" class="box-sub">A api.pangkalpinangkota</text>
+  <text x="320" y="172" text-anchor="middle" class="box-sub">.go.id → &lt;VPS IP&gt;</text>
+
+  <!-- External Keycloak -->
+  <rect class="box-ext" x="640" y="120" width="200" height="60"/>
+  <text x="740" y="142" text-anchor="middle" class="box-title">Keycloak (external)</text>
+  <text x="740" y="158" text-anchor="middle" class="box-sub">sso.pangkalpinangkota.go.id</text>
+  <text x="740" y="172" text-anchor="middle" class="box-sub">/realms/pangkalpinang</text>
+
+  <!-- Let's Encrypt -->
+  <rect class="box-ext" x="860" y="120" width="160" height="60"/>
+  <text x="940" y="142" text-anchor="middle" class="box-title">Let's Encrypt</text>
+  <text x="940" y="158" text-anchor="middle" class="box-sub">ACME issuer</text>
+  <text x="940" y="172" text-anchor="middle" class="box-sub">OCSP responder</text>
+
+  <text x="56" y="220" class="label-sub">Mobile resolves api.pangkalpinangkota.go.id → connects on 443. Outbound from VPS to KC + Let's Encrypt also on 443.</text>
+  <text x="56" y="240" class="label-bad">Everything else into the VPS is blocked by UFW (only SSH 22 / HTTP 80 / HTTPS 443 are allowed in).</text>
+
+  <!-- VPS zone -->
+  <rect class="vps-band" x="40" y="280" width="1000" height="500"/>
+  <text x="56" y="304" class="section-title">Ubuntu LTS VPS  (2-4 vCPU, 2-4 GB RAM, deploy user)</text>
+  <text x="56" y="322" class="label-sub">UFW: deny incoming; allow OpenSSH, 80/tcp, 443/tcp. fail2ban on SSH. swap 2GB. Docker logs capped at 10MB × 5.</text>
+
+  <!-- Docker network -->
+  <rect class="docker-band" x="60" y="340" width="960" height="380"/>
+  <text x="76" y="362" class="label-title" fill="#4338ca">Docker network: super-app-ecosystem-test_default  (bridge)</text>
+
+  <!-- nginx (with host port mapping) -->
+  <rect class="box-edge" x="80" y="380" width="180" height="120"/>
+  <text x="170" y="402" text-anchor="middle" class="box-title">nginx</text>
+  <text x="170" y="416" text-anchor="middle" class="box-sub">TLS / rate-limit / X-Request-Id</text>
+  <rect class="port-pill port-public" x="92" y="426" width="160" height="20"/>
+  <text x="172" y="441" text-anchor="middle" class="port-text" fill="#9f1239">host :80  → nginx:80</text>
+  <rect class="port-pill port-public" x="92" y="450" width="160" height="20"/>
+  <text x="172" y="465" text-anchor="middle" class="port-text" fill="#9f1239">host :443 → nginx:443</text>
+  <rect class="port-pill port-internal" x="92" y="474" width="160" height="20"/>
+  <text x="172" y="489" text-anchor="middle" class="port-text" fill="#15803d">internal :8081 stub_status</text>
+
+  <!-- BFF -->
+  <rect class="box-bff" x="280" y="380" width="160" height="80"/>
+  <text x="360" y="402" text-anchor="middle" class="box-title">bff</text>
+  <text x="360" y="416" text-anchor="middle" class="box-sub">Express / TS</text>
+  <rect class="port-pill port-internal" x="290" y="426" width="140" height="20"/>
+  <text x="360" y="441" text-anchor="middle" class="port-text" fill="#15803d">internal :3000</text>
+  <text x="360" y="455" text-anchor="middle" class="box-sub">no host port</text>
+
+  <!-- Redis -->
+  <rect class="box-store" x="280" y="476" width="160" height="80"/>
+  <text x="360" y="498" text-anchor="middle" class="box-title">redis</text>
+  <text x="360" y="512" text-anchor="middle" class="box-sub">redis:7-alpine, AOF on</text>
+  <rect class="port-pill port-internal" x="290" y="522" width="140" height="20"/>
+  <text x="360" y="537" text-anchor="middle" class="port-text" fill="#15803d">internal :6379</text>
+  <text x="360" y="551" text-anchor="middle" class="box-sub">no host port</text>
+
+  <!-- Kong -->
+  <rect class="box-kong" x="460" y="380" width="200" height="120"/>
+  <text x="560" y="402" text-anchor="middle" class="box-title">kong</text>
+  <text x="560" y="416" text-anchor="middle" class="box-sub">3.8-ubuntu, DB-less</text>
+  <rect class="port-pill port-internal" x="476" y="426" width="168" height="20"/>
+  <text x="560" y="441" text-anchor="middle" class="port-text" fill="#15803d">internal :8000 proxy</text>
+  <rect class="port-pill port-internal" x="476" y="450" width="168" height="20"/>
+  <text x="560" y="465" text-anchor="middle" class="port-text" fill="#15803d">internal :8100 status</text>
+  <text x="560" y="486" text-anchor="middle" class="box-sub" fill="#9f1239">Admin API OFF</text>
+
+  <!-- sample-service -->
+  <rect class="box-svc" x="680" y="380" width="160" height="80"/>
+  <text x="760" y="402" text-anchor="middle" class="box-title">sample-service</text>
+  <text x="760" y="416" text-anchor="middle" class="box-sub">Express / TS</text>
+  <rect class="port-pill port-internal" x="690" y="426" width="140" height="20"/>
+  <text x="760" y="441" text-anchor="middle" class="port-text" fill="#15803d">internal :3001</text>
+  <text x="760" y="455" text-anchor="middle" class="box-sub">no host port</text>
+
+  <!-- nginx-exporter -->
+  <rect class="box-edge" x="680" y="476" width="160" height="80"/>
+  <text x="760" y="498" text-anchor="middle" class="box-title">nginx-exporter</text>
+  <text x="760" y="512" text-anchor="middle" class="box-sub">Prometheus scrape target</text>
+  <rect class="port-pill port-internal" x="690" y="522" width="140" height="20"/>
+  <text x="760" y="537" text-anchor="middle" class="port-text" fill="#15803d">internal :9113</text>
+  <text x="760" y="551" text-anchor="middle" class="box-sub">no host port</text>
+
+  <!-- Volumes -->
+  <rect class="volume-band" x="860" y="380" width="150" height="80"/>
+  <text x="935" y="400" text-anchor="middle" class="label-title" fill="#6d28d9">named volumes</text>
+  <text x="935" y="418" text-anchor="middle" class="box-sub">redis-data</text>
+  <text x="935" y="434" text-anchor="middle" class="box-sub">certbot-webroot</text>
+  <text x="935" y="450" text-anchor="middle" class="box-sub">(both shared / persistent)</text>
+
+  <rect class="volume-band" x="860" y="476" width="150" height="80"/>
+  <text x="935" y="496" text-anchor="middle" class="label-title" fill="#6d28d9">bind mounts</text>
+  <text x="935" y="514" text-anchor="middle" class="box-sub">./nginx/certs (RO)</text>
+  <text x="935" y="530" text-anchor="middle" class="box-sub">./kong/kong.yml (RO)</text>
+  <text x="935" y="546" text-anchor="middle" class="box-sub">./bff/keys/ (RO, dev only)</text>
+
+  <!-- Edges inside Docker network -->
+  <line x1="260" y1="430" x2="278" y2="420" class="edge-data" marker-end="url(#arrow-data)"/>
+  <text x="270" y="412" text-anchor="middle" class="box-sub" fill="#1d4ed8">/auth/*</text>
+
+  <line x1="260" y1="470" x2="458" y2="440" class="edge-data" marker-end="url(#arrow-data)"/>
+  <text x="360" y="380" text-anchor="middle" class="box-sub" fill="#1d4ed8">/api/*</text>
+
+  <line x1="440" y1="430" x2="458" y2="430" class="edge"/>
+  <line x1="660" y1="430" x2="678" y2="430" class="edge-data" marker-end="url(#arrow-data)"/>
+
+  <line x1="360" y1="460" x2="360" y2="476" class="edge"/>
+
+  <line x1="260" y1="494" x2="678" y2="510" class="edge" stroke-dasharray="4,3"/>
+  <text x="500" y="494" text-anchor="middle" class="box-sub">stub_status scrape</text>
+
+  <!-- Volume attach lines -->
+  <line x1="252" y1="464" x2="858" y2="430" class="edge-volume"/>
+  <line x1="440" y1="516" x2="858" y2="430" class="edge-volume"/>
+  <line x1="540" y1="500" x2="858" y2="514" class="edge-volume"/>
+  <line x1="440" y1="460" x2="858" y2="540" class="edge-volume"/>
+
+  <!-- External arrows from nginx host ports -->
+  <line x1="170" y1="380" x2="170" y2="260" class="edge-data" marker-end="url(#arrow-data)"/>
+  <text x="180" y="320" class="box-sub" fill="#1d4ed8">HTTPS in via host :80/:443</text>
+
+  <line x1="220" y1="180" x2="170" y2="378" class="edge-data" marker-end="url(#arrow-data)"/>
+
+  <!-- Outbound from BFF -->
+  <path d="M 440 400 C 540 280 640 220 720 180" class="edge-out" marker-end="url(#arrow-out)"/>
+  <text x="600" y="310" text-anchor="middle" class="label-bad">outbound 443 → KC</text>
+
+  <!-- Outbound (host-side) for ACME -->
+  <path d="M 170 380 C 400 320 700 240 940 180" class="edge-out" marker-end="url(#arrow-out)"/>
+  <text x="640" y="362" text-anchor="middle" class="label-bad">outbound 443 → Let's Encrypt (certbot one-shot)</text>
+
+  <!-- Legend -->
+  <g transform="translate(60,740)">
+    <rect x="0" y="0" width="940" height="36" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" rx="8"/>
+    <rect class="port-pill port-public" x="14" y="9" width="86" height="18"/>
+    <text x="57" y="22" text-anchor="middle" class="port-text" fill="#9f1239">host port (exposed)</text>
+    <rect class="port-pill port-internal" x="120" y="9" width="120" height="18"/>
+    <text x="180" y="22" text-anchor="middle" class="port-text" fill="#15803d">internal port (Docker only)</text>
+    <line x1="270" y1="18" x2="320" y2="18" class="edge-out" marker-end="url(#arrow-out)"/>
+    <text x="328" y="22" class="box-sub">outbound 443 only</text>
+    <line x1="480" y1="18" x2="530" y2="18" class="edge-volume"/>
+    <text x="538" y="22" class="box-sub">volume / bind mount</text>
+    <line x1="680" y1="18" x2="730" y2="18" class="edge-data" marker-end="url(#arrow-data)"/>
+    <text x="738" y="22" class="box-sub">request flow</text>
+  </g>
+
+  <text x="540" y="800" text-anchor="middle" class="label-sub">See docs/DEPLOYMENT.md for the full step-by-step (DNS, UFW, certbot, kid promotion, day-2 ops).</text>
+</svg>

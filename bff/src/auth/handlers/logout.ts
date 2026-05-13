@@ -1,8 +1,9 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
-import { badRequest, unauthorized } from '../../lib/errors.js';
+import { badRequestFromZod, unauthorized } from '../../lib/errors.js';
 import type { KeycloakClient } from '../../lib/keycloak.js';
 import type { SessionStore } from '../stores/session.store.js';
+import type { UserSessionsStore } from '../stores/userSessions.store.js';
 
 const BodySchema = z.object({
   session_id: z.string().min(1),
@@ -11,12 +12,13 @@ const BodySchema = z.object({
 export const makeLogoutHandler = (deps: {
   keycloak: KeycloakClient;
   sessionStore: SessionStore;
+  userSessionsStore: UserSessionsStore;
 }): RequestHandler => {
   return async (req, res, next) => {
     try {
       const parsed = BodySchema.safeParse(req.body);
       if (!parsed.success) {
-        throw badRequest('invalid_request', parsed.error.issues[0]?.message ?? 'Invalid body');
+        throw badRequestFromZod(parsed.error, 'Invalid body');
       }
       // §2.1: bearer required (router middleware), sid must match body.
       const claims = req.claims;
@@ -31,6 +33,7 @@ export const makeLogoutHandler = (deps: {
       if (session) {
         await deps.keycloak.endSession(session.refreshToken);
         await deps.sessionStore.delete(parsed.data.session_id);
+        await deps.userSessionsStore.remove(session.sub, parsed.data.session_id);
       }
       res.setHeader('Cache-Control', 'no-store');
       res.status(204).end();

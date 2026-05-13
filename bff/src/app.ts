@@ -12,6 +12,8 @@ import type { MetricsBundle } from './lib/metrics.js';
 import { errorMiddleware } from './middleware/error.js';
 import { metricsMiddleware } from './middleware/metrics.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
+import { timeoutMiddleware } from './middleware/timeout.js';
+import { requestContextMiddleware } from './lib/requestContext.js';
 import { buildWellKnownRouter } from './wellKnown/router.js';
 
 export interface AppDeps {
@@ -27,9 +29,17 @@ export interface AppDeps {
 export const createApp = ({ env, log, redis, authDeps, keycloak, metrics }: AppDeps): Express => {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 1);
+  // AUDIT PR-9: JSON 200s don't benefit from etag; disabling keeps headers
+  // predictable for the API contract and avoids accidental cache hits.
+  app.disable('etag');
+  // AUDIT S-3: env-driven trust-proxy so adding a second hop (Cloudflare,
+  // mesh sidecar) doesn't silently make X-Forwarded-For spoofable.
+  app.set('trust proxy', env.TRUST_PROXY);
 
   app.use(requestIdMiddleware);
+  // AUDIT PR-3: pin req.id into AsyncLocalStorage so the KC HTTP client
+  // can stamp outbound x-request-id without explicit threading.
+  app.use(requestContextMiddleware);
   app.use(pinoHttp({ logger: log }) as unknown as RequestHandler);
   if (metrics) app.use(metricsMiddleware(metrics));
   app.use(helmet());
@@ -37,7 +47,9 @@ export const createApp = ({ env, log, redis, authDeps, keycloak, metrics }: AppD
     app.use(cors({ origin: env.CORS_ORIGINS, credentials: false }));
   }
   app.use(express.json({ limit: '64kb' }));
-  app.use(express.urlencoded({ extended: false, limit: '64kb' }));
+  // AUDIT PR-4: cap request handling time so a stalled KC upstream returns
+  // a clean 504 instead of holding the inbound connection open.
+  app.use(timeoutMiddleware(env.REQUEST_TIMEOUT_MS));
 
   app.use('/', buildHealthRouter({ redis, keycloak: keycloak ?? authDeps.keycloak, env }));
   app.use('/', buildWellKnownRouter(authDeps.internalJwtIssuer));

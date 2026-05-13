@@ -2,11 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/logging/auth_log.dart';
 
-void _log(String msg) {
-  // ignore: avoid_print
-  if (kDebugMode) print('[AUTH/api] $msg');
-}
+void _log(String msg) => authLog('api', msg);
 
 /// Thin HTTP client for the BFF auth endpoints.
 ///
@@ -55,8 +53,10 @@ class BffAuthApi {
   final AppConfig config;
   final Dio _dio;
 
-  Future<({String accessToken, String sessionId, int expiresIn, String? idToken})>
-      refresh({required String sessionId, required String bearer}) async {
+  Future<({String accessToken, String sessionId, int expiresIn})> refresh({
+    required String sessionId,
+    required String bearer,
+  }) async {
     final res = await _dio.post<Map<String, dynamic>>(
       '/auth/refresh',
       data: {'session_id': sessionId},
@@ -67,7 +67,6 @@ class BffAuthApi {
       accessToken: body['access_token'] as String,
       sessionId: (body['session_id'] as String?) ?? sessionId,
       expiresIn: (body['expires_in'] as num).toInt(),
-      idToken: body['id_token'] as String?,
     );
   }
 

@@ -43,9 +43,21 @@ export interface KeycloakAccessClaims {
   resource_access?: Record<string, { roles?: string[] }>;
 }
 
+export interface KeycloakLogoutTokenClaims {
+  sub?: string;
+  sid?: string;
+  iss: string;
+  aud: string | string[];
+  iat: number;
+  jti?: string;
+  events?: Record<string, unknown>;
+  nonce?: string;
+}
+
 export interface KeycloakJwtVerifier {
   verifyIdToken(token: string): Promise<KeycloakIdClaims>;
   verifyAccessToken(token: string): Promise<KeycloakAccessClaims>;
+  verifyLogoutToken(token: string): Promise<KeycloakLogoutTokenClaims>;
 }
 
 export class KeycloakJwtVerificationError extends Error {
@@ -122,6 +134,17 @@ export const createKeycloakJwtVerifier = (
       });
       return payload;
     } catch (err) {
+      // AUDIT S-4: if jose couldn't resolve the kid against the cached
+      // JWKS, KC may have rotated keys. Invalidate the cached discovery
+      // (and therefore the JWKS function on next call) and surface the
+      // failure to the caller. We do NOT auto-retry — that would mask
+      // genuine forgeries.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/no applicable key|kid|"JWKSNoMatchingKey"|JOSEAlgNotAllowed/i.test(msg)) {
+        // Safe-call: test stubs may not implement invalidateDiscovery.
+        (opts.keycloak as { invalidateDiscovery?: () => void }).invalidateDiscovery?.();
+        jwksPromise = undefined;
+      }
       if (opts.metrics) {
         opts.metrics.authFailedTotal.inc({
           reason: kind === 'idtoken' ? 'idtoken_verify_failed' : 'accesstoken_verify_failed',
@@ -136,27 +159,77 @@ export const createKeycloakJwtVerifier = (
   };
 
   return {
-    async verifyIdToken(token) {
+    async verifyIdToken(token: string) {
       const payload = await verify('idtoken', token, opts.clientId);
       // §2.3 belt-and-braces: id_token's `azp` (authorized party) MUST be
       // the BFF's client_id when present. jose validates `aud`; this
       // tightens the contract.
-      if (payload.azp && payload.azp !== opts.clientId) {
+      const azp = typeof payload.azp === 'string' ? payload.azp : undefined;
+      if (azp && azp !== opts.clientId) {
         if (opts.metrics) {
           opts.metrics.authFailedTotal.inc({ reason: 'idtoken_verify_failed' });
         }
         throw new KeycloakJwtVerificationError(
           'idtoken',
-          `azp mismatch: expected ${opts.clientId}, got ${payload.azp}`,
+          `azp mismatch: expected ${opts.clientId}, got ${azp}`,
         );
       }
       return payload as unknown as KeycloakIdClaims;
     },
-    async verifyAccessToken(token) {
+    async verifyAccessToken(token: string) {
       // No audience check — KC access tokens don't carry a stable `aud`
       // across realm configs. Signature + iss + exp is the contract.
       const payload = await verify('accesstoken', token, undefined);
       return payload as unknown as KeycloakAccessClaims;
+    },
+    async verifyLogoutToken(token: string) {
+      // AUDIT S-5: back-channel logout tokens follow the OIDC spec —
+      // same JWKS as id_tokens but with `events` and no `nonce`.
+      const payload = (await verify('idtoken', token, opts.clientId)) as Record<string, unknown>;
+      return payload as unknown as KeycloakLogoutTokenClaims;
+    },
+  };
+};
+
+/** Shape of the user-profile snapshot the BFF stores in Redis. Kept in
+ *  sync with `SessionProfile` in `auth/stores/session.store.ts`. */
+export interface VerifiedProfile {
+  username?: string;
+  email?: string;
+  roles: string[];
+}
+
+/**
+ * Verify upstream tokens and project them into a profile snapshot.
+ *
+ * Used by /auth/callback (fresh from KC), /auth/refresh (fresh from KC),
+ * and /auth/token (loaded from `bffcode:*` Redis records).
+ *
+ * The verifier guarantees:
+ *   - signature against KC's JWKS
+ *   - issuer = KC_ISSUER
+ *   - id_token aud = KC_CLIENT_ID
+ *   - exp not past (with clockTolerance)
+ *
+ * AUDIT M-1 — moved here from `auth/handlers/token.ts` so callers
+ * (`token.ts`, `refresh.ts`, …) depend on the same library symbol instead
+ * of importing across the handler layer.
+ */
+export const verifyAndExtractProfile = async (
+  verifier: KeycloakJwtVerifier,
+  accessToken: string | undefined,
+  idToken: string | undefined,
+  fallbackSub: string,
+): Promise<{ sub: string; profile: VerifiedProfile }> => {
+  const idClaims = idToken ? await verifier.verifyIdToken(idToken) : null;
+  const acClaims = accessToken ? await verifier.verifyAccessToken(accessToken) : null;
+  const sub = idClaims?.sub ?? acClaims?.sub ?? fallbackSub;
+  return {
+    sub,
+    profile: {
+      username: idClaims?.preferred_username,
+      email: idClaims?.email,
+      roles: acClaims?.realm_access?.roles ?? [],
     },
   };
 };

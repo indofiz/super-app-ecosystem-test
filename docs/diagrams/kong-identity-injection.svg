@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 820" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>Kong Identity Injection — strip → decode → enforce → set → clear</title>
+  <desc>The Kong pre-function plugin runs after the bundled jwt plugin verified the signature. It strips any inbound caller-supplied identity headers, decodes the verified claims, enforces iss/aud, re-sets the X-* identity headers from trusted values, and clears the Authorization header before forwarding to the upstream service.</desc>
+
+  <defs>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+    <style>
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .section-title { font-weight:700; font-size:15px; fill:#0f172a; }
+
+      .panel       { fill:#ffffff; stroke:#cbd5e1; stroke-width:1.5; rx:10; }
+      .panel-bad   { fill:#fee2e2; stroke:#b91c1c; stroke-width:1.5; rx:10; }
+      .panel-good  { fill:#dcfce7; stroke:#15803d; stroke-width:1.5; rx:10; }
+      .panel-kong  { fill:#dbeafe; stroke:#1d4ed8; stroke-width:1.5; rx:10; }
+
+      .header-line { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#0f172a; }
+      .header-bad  { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#9f1239; text-decoration:line-through; }
+      .header-good { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#15803d; font-weight:700; }
+      .header-stripped { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#64748b; text-decoration:line-through; }
+
+      .step-circle { fill:#1d4ed8; }
+      .step-text   { fill:#ffffff; font-weight:700; font-size:11px; }
+      .step-label  { font-weight:700; font-size:12px; fill:#1d4ed8; }
+      .step-body   { font-size:11px; fill:#1f2937; }
+
+      .note       { fill:#fef9c3; stroke:#a16207; stroke-width:1; rx:6; }
+      .note-text  { font-size:11px; fill:#713f12; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">Kong Identity Injection — what changes between in and out</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">A malicious client could try to claim admin by sending X-User-Id directly. The pre-function plugin strips first, then sets only from the verified JWT.</text>
+
+  <!-- INBOUND -->
+  <text x="200" y="84" text-anchor="middle" class="section-title">INBOUND from nginx</text>
+  <rect class="panel-bad" x="40" y="100" width="320" height="240"/>
+  <text x="56" y="124" class="header-line" font-weight="700">GET /api/profile HTTP/1.1</text>
+  <text x="56" y="144" class="header-line">Host: api.pangkalpinangkota.go.id</text>
+  <text x="56" y="164" class="header-good">Authorization: Bearer &lt;internal-jwt&gt;</text>
+  <text x="56" y="184" class="header-line">X-Request-Id: 8a7b6c5d-...</text>
+  <text x="56" y="208" class="label-sub" fill="#9f1239" font-weight="700">+ caller-supplied (potentially spoofed):</text>
+  <text x="56" y="226" class="header-bad">X-User-Id: admin</text>
+  <text x="56" y="244" class="header-bad">X-Roles: super-admin,sysadmin</text>
+  <text x="56" y="262" class="header-bad">X-Session-Id: someone-elses-sid</text>
+  <text x="56" y="290" class="label-sub" fill="#9f1239">a naive upstream would honor these and grant admin access</text>
+
+  <!-- KONG processing -->
+  <text x="540" y="84" text-anchor="middle" class="section-title">Kong (access phase)</text>
+  <rect class="panel-kong" x="380" y="100" width="320" height="500"/>
+
+  <!-- Step 1: jwt plugin (already verified signature) -->
+  <circle cx="402" cy="124" r="11" class="step-circle"/><text x="402" y="128" text-anchor="middle" class="step-text">A</text>
+  <text x="420" y="120" class="step-label">jwt plugin (priority 1450)</text>
+  <text x="420" y="134" class="step-body">already ran — signature, exp, nbf,</text>
+  <text x="420" y="148" class="step-body">max_expiration=600s all passed</text>
+  <text x="420" y="162" class="step-body">(if not, 401 was returned and</text>
+  <text x="420" y="176" class="step-body">this stage is never reached)</text>
+
+  <!-- Step 2: strip caller identity headers -->
+  <circle cx="402" cy="208" r="11" class="step-circle"/><text x="402" y="212" text-anchor="middle" class="step-text">1</text>
+  <text x="420" y="204" class="step-label">strip caller identity headers</text>
+  <text x="420" y="218" class="step-body">kong.service.request.clear_header(...)</text>
+  <text x="420" y="232" class="header-stripped">  X-User-Id</text>
+  <text x="420" y="246" class="header-stripped">  X-Roles</text>
+  <text x="420" y="260" class="header-stripped">  X-Session-Id</text>
+
+  <!-- Step 3: decode payload -->
+  <circle cx="402" cy="294" r="11" class="step-circle"/><text x="402" y="298" text-anchor="middle" class="step-text">2</text>
+  <text x="420" y="290" class="step-label">decode JWT payload</text>
+  <text x="420" y="304" class="step-body">match "([^.]+)%.([^.]+)%.([^.]+)"</text>
+  <text x="420" y="318" class="step-body">base64url-decode segment 2</text>
+  <text x="420" y="332" class="step-body">cjson.safe → claims table</text>
+
+  <!-- Step 4: enforce iss/aud -->
+  <circle cx="402" cy="364" r="11" class="step-circle"/><text x="402" y="368" text-anchor="middle" class="step-text">3</text>
+  <text x="420" y="360" class="step-label">enforce iss / aud</text>
+  <text x="420" y="374" class="step-body">claims.iss == "super-app-bff"</text>
+  <text x="420" y="388" class="step-body">claims.aud contains "super-app-services"</text>
+  <text x="420" y="402" class="step-body" fill="#9f1239">— 401 if either fails</text>
+
+  <!-- Step 5: set trusted headers -->
+  <circle cx="402" cy="434" r="11" class="step-circle"/><text x="402" y="438" text-anchor="middle" class="step-text">4</text>
+  <text x="420" y="430" class="step-label">set trusted identity headers</text>
+  <text x="420" y="444" class="step-body">set_header X-User-Id = claims.sub</text>
+  <text x="420" y="458" class="step-body">set_header X-Session-Id = claims.sid</text>
+  <text x="420" y="472" class="step-body">set_header X-Roles = join(claims.roles, ",")</text>
+
+  <!-- Step 6: clear Authorization -->
+  <circle cx="402" cy="504" r="11" class="step-circle"/><text x="402" y="508" text-anchor="middle" class="step-text">5</text>
+  <text x="420" y="500" class="step-label">CLEAR Authorization upstream</text>
+  <text x="420" y="514" class="step-body">kong.service.request.clear_header(</text>
+  <text x="420" y="528" class="step-body">  "authorization"</text>
+  <text x="420" y="542" class="step-body">)</text>
+  <text x="420" y="562" class="step-body" fill="#15803d">no raw bearer leaks to upstream logs</text>
+
+  <!-- Step 7: rate-limit -->
+  <circle cx="402" cy="582" r="11" class="step-circle"/><text x="402" y="586" text-anchor="middle" class="step-text">6</text>
+  <text x="420" y="578" class="step-label">rate-limit by X-User-Id</text>
+  <text x="420" y="592" class="step-body">600/min/user, fail-open</text>
+
+  <!-- OUTBOUND -->
+  <text x="880" y="84" text-anchor="middle" class="section-title">OUTBOUND to service</text>
+  <rect class="panel-good" x="720" y="100" width="320" height="240"/>
+  <text x="736" y="124" class="header-line" font-weight="700">GET / HTTP/1.1   (Kong stripped /api/profile)</text>
+  <text x="736" y="144" class="header-line">Host: sample-service:3001</text>
+  <text x="736" y="168" class="label-sub" fill="#15803d" font-weight="700">trusted identity from verified JWT:</text>
+  <text x="736" y="186" class="header-good">X-User-Id: f47ac10b-58cc-4372-...</text>
+  <text x="736" y="204" class="header-good">X-Session-Id: sid-abc123...</text>
+  <text x="736" y="222" class="header-good">X-Roles: citizen,verified</text>
+  <text x="736" y="244" class="header-line">X-Request-Id: 8a7b6c5d-...</text>
+  <text x="736" y="272" class="label-sub" fill="#9f1239">No Authorization header — JWT did its job;</text>
+  <text x="736" y="288" class="label-sub" fill="#9f1239">the upstream MUST trust the X-* headers only.</text>
+
+  <!-- Arrows -->
+  <line x1="360" y1="220" x2="378" y2="220" stroke="#1d4ed8" stroke-width="2" marker-end="url(#arrow-data)"/>
+  <line x1="700" y1="220" x2="718" y2="220" stroke="#1d4ed8" stroke-width="2" marker-end="url(#arrow-data)"/>
+
+  <!-- Footer -->
+  <text x="60" y="640" class="section-title">Why this order matters</text>
+  <g transform="translate(40,656)">
+    <rect class="note" x="0" y="0" width="1000" height="140"/>
+    <text x="14" y="22" class="note-text">• Plugin priorities — jwt (1450) runs before pre-function (1000) runs before rate-limit (910). The pre-function relies on this; AUDIT M-1 tracks a contract test to catch a future Kong upgrade that flips the order.</text>
+    <text x="14" y="42" class="note-text">• Strip BEFORE decode — if decode came first and the payload was malformed, an early-return path would leave the caller's X-User-Id intact and forwarded upstream as if it were trusted.</text>
+    <text x="14" y="62" class="note-text">• Enforce iss/aud AFTER decode — the bundled jwt plugin verifies signature + exp + nbf only. Without this re-check, any other RS256 signer that happened to share a kid would be accepted.</text>
+    <text x="14" y="82" class="note-text">• Clear Authorization LAST — the JWT plugin needs to read it, the pre-function needs to read it to decode payload. Only after we've extracted everything we need do we strip it so no raw bearer reaches upstream stores.</text>
+    <text x="14" y="106" class="note-text" fill="#9f1239">Sandbox: the pre-function Lua needs cjson.safe (KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES=cjson.safe). The kong/lua/identity_inject.lua file is the canonical source;</text>
+    <text x="14" y="120" class="note-text" fill="#9f1239">the inline block in kong.yml is what actually runs. `node kong/scripts/check-lua-sync.mjs` fails if they drift.</text>
+  </g>
+</svg>

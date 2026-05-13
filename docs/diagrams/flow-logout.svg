@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 980" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>Logout — App-initiated + OIDC Back-Channel</title>
+  <desc>Two scenarios. (A) App calls POST /auth/logout with bearer + session_id; BFF best-effort ends KC session and wipes the local Redis session. (B) Keycloak POSTs a signed logout_token to /auth/back-channel-logout when a user logs out elsewhere; the BFF deletes every session indexed under that sub. In-flight internal JWTs remain valid up to ~5 min until exp.</desc>
+
+  <defs>
+    <marker id="arrow-auth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+    <marker id="arrow-store" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6d28d9"/>
+    </marker>
+    <style>
+      .box { fill:#ffffff; stroke:#334155; stroke-width:1.5; rx:10; }
+      .box-bff    { fill:#fef3c7; stroke:#b45309; }
+      .box-ext    { fill:#fde2e7; stroke:#9f1239; stroke-dasharray:6,4; }
+      .box-store  { fill:#ede9fe; stroke:#6d28d9; }
+      .box-mobile { fill:#f0f9ff; stroke:#0369a1; }
+
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .lifeline    { stroke:#94a3b8; stroke-width:1; stroke-dasharray:3,4; }
+
+      .msg-auth   { stroke:#b45309; stroke-width:1.8; fill:none; }
+      .msg-store  { stroke:#6d28d9; stroke-width:1.8; fill:none; }
+      .msg-label  { font-size:11px; fill:#1f2937; }
+      .note       { fill:#fef9c3; stroke:#a16207; stroke-width:1; rx:6; }
+      .note-text  { font-size:11px; fill:#713f12; }
+      .step-bg    { fill:#0f172a; }
+      .step-num   { fill:#ffffff; font-weight:700; font-size:10px; }
+      .section-title { font-weight:700; font-size:15px; fill:#0f172a; }
+      .scenario-band { fill:#fff7ed; stroke:#b45309; stroke-width:1.5; rx:10; }
+      .scenario-band-b { fill:#eff6ff; stroke:#0369a1; stroke-width:1.5; rx:10; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">Logout — App-initiated and OIDC Back-Channel</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">Both paths wipe Redis. Issued internal JWTs remain valid until exp (≤5 min) — accepted limitation; for instant revocation a jti denylist would be needed.</text>
+
+  <!-- SCENARIO A: App-initiated -->
+  <rect class="scenario-band" x="40" y="70" width="1000" height="450"/>
+  <text x="56" y="92" class="section-title" fill="#b45309">A. App-initiated logout — POST /auth/logout</text>
+
+  <!-- Actors A -->
+  <rect class="box box-mobile" x="60"  y="108" width="140" height="50"/>
+  <text x="130" y="130" text-anchor="middle" class="label-title">Mobile</text>
+  <text x="130" y="146" text-anchor="middle" class="label-sub">tap “Sign out”</text>
+
+  <rect class="box box-bff" x="350" y="108" width="160" height="50"/>
+  <text x="430" y="130" text-anchor="middle" class="label-title">BFF</text>
+  <text x="430" y="146" text-anchor="middle" class="label-sub">/auth/logout</text>
+
+  <rect class="box box-ext" x="640" y="108" width="160" height="50"/>
+  <text x="720" y="130" text-anchor="middle" class="label-title">Keycloak</text>
+  <text x="720" y="146" text-anchor="middle" class="label-sub">end_session</text>
+
+  <rect class="box box-store" x="880" y="108" width="140" height="50"/>
+  <text x="950" y="130" text-anchor="middle" class="label-title">Redis</text>
+  <text x="950" y="146" text-anchor="middle" class="label-sub">sessions</text>
+
+  <!-- Lifelines A -->
+  <line x1="130" y1="160" x2="130" y2="500" class="lifeline"/>
+  <line x1="430" y1="160" x2="430" y2="500" class="lifeline"/>
+  <line x1="720" y1="160" x2="720" y2="500" class="lifeline"/>
+  <line x1="950" y1="160" x2="950" y2="500" class="lifeline"/>
+
+  <!-- A-1: Mobile -> BFF -->
+  <line x1="130" y1="200" x2="428" y2="200" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="146" cy="194" r="9" class="step-bg"/><text x="146" y="198" text-anchor="middle" class="step-num">1</text>
+  <text x="279" y="194" text-anchor="middle" class="msg-label">POST /auth/logout { session_id }  + Authorization: Bearer &lt;jwt&gt;</text>
+
+  <!-- Note: verifyAllowExpired + sid bind -->
+  <rect class="note" x="350" y="220" width="160" height="36"/>
+  <text x="430" y="238" text-anchor="middle" class="note-text">verifyAllowExpired (≤24h)</text>
+  <text x="430" y="251" text-anchor="middle" class="note-text">enforce claims.sid == body.sid</text>
+
+  <!-- A-2: BFF -> Redis GET session -->
+  <line x1="430" y1="280" x2="948" y2="280" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="446" cy="274" r="9" class="step-bg"/><text x="446" y="278" text-anchor="middle" class="step-num">2</text>
+  <text x="689" y="274" text-anchor="middle" class="msg-label" fill="#6d28d9">GET session:SID   → { refresh_token, sub }</text>
+
+  <!-- A-3: BFF -> KC end_session (best-effort) -->
+  <line x1="430" y1="320" x2="718" y2="320" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="446" cy="314" r="9" class="step-bg"/><text x="446" y="318" text-anchor="middle" class="step-num">3</text>
+  <text x="574" y="314" text-anchor="middle" class="msg-label">POST end_session_endpoint  (refresh_token, client_secret)  — best-effort</text>
+
+  <!-- A-4: BFF -> Redis DEL session -->
+  <line x1="430" y1="360" x2="948" y2="360" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="446" cy="354" r="9" class="step-bg"/><text x="446" y="358" text-anchor="middle" class="step-num">4</text>
+  <text x="689" y="354" text-anchor="middle" class="msg-label" fill="#6d28d9">DEL session:SID</text>
+
+  <!-- A-5: BFF -> Redis SREM userSessions -->
+  <line x1="430" y1="400" x2="948" y2="400" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="446" cy="394" r="9" class="step-bg"/><text x="446" y="398" text-anchor="middle" class="step-num">5</text>
+  <text x="689" y="394" text-anchor="middle" class="msg-label" fill="#6d28d9">SREM userSessions:&lt;sub&gt;  SID  (drop sid from per-user index)</text>
+
+  <!-- A-6: BFF -> Mobile 204 -->
+  <line x1="428" y1="440" x2="132" y2="440" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="414" cy="434" r="9" class="step-bg"/><text x="414" y="438" text-anchor="middle" class="step-num">6</text>
+  <text x="279" y="434" text-anchor="middle" class="msg-label">204 No Content   (returned even if KC was unreachable)</text>
+
+  <!-- A-7: Mobile self -->
+  <rect class="note" x="60" y="465" width="160" height="22"/>
+  <text x="140" y="480" text-anchor="middle" class="note-text">secureStore.clear()</text>
+  <circle cx="76" cy="476" r="9" class="step-bg"/><text x="76" y="480" text-anchor="middle" class="step-num">7</text>
+
+  <!-- SCENARIO B: Back-channel -->
+  <rect class="scenario-band-b" x="40" y="540" width="1000" height="380"/>
+  <text x="56" y="562" class="section-title" fill="#0369a1">B. OIDC back-channel logout — KC POSTs to /auth/back-channel-logout</text>
+
+  <!-- Actors B -->
+  <rect class="box box-ext" x="60"  y="578" width="160" height="50"/>
+  <text x="140" y="600" text-anchor="middle" class="label-title">Keycloak</text>
+  <text x="140" y="616" text-anchor="middle" class="label-sub">user logs out elsewhere</text>
+
+  <rect class="box box-bff" x="430" y="578" width="160" height="50"/>
+  <text x="510" y="600" text-anchor="middle" class="label-title">BFF</text>
+  <text x="510" y="616" text-anchor="middle" class="label-sub">/auth/back-channel-logout</text>
+
+  <rect class="box box-store" x="780" y="578" width="160" height="50"/>
+  <text x="860" y="600" text-anchor="middle" class="label-title">Redis</text>
+  <text x="860" y="616" text-anchor="middle" class="label-sub">sessions + index</text>
+
+  <!-- Lifelines B -->
+  <line x1="140" y1="628" x2="140" y2="900" class="lifeline"/>
+  <line x1="510" y1="628" x2="510" y2="900" class="lifeline"/>
+  <line x1="860" y1="628" x2="860" y2="900" class="lifeline"/>
+
+  <!-- B-1: KC -> BFF logout_token -->
+  <line x1="140" y1="670" x2="508" y2="670" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="156" cy="664" r="9" class="step-bg"/><text x="156" y="668" text-anchor="middle" class="step-num">1</text>
+  <text x="324" y="664" text-anchor="middle" class="msg-label">POST /auth/back-channel-logout  Content-Type: x-www-form-urlencoded</text>
+  <text x="324" y="684" text-anchor="middle" class="msg-label">body: logout_token=&lt;signed-JWT-from-KC&gt;</text>
+
+  <!-- Note: verify logout_token -->
+  <rect class="note" x="430" y="700" width="160" height="62"/>
+  <text x="510" y="718" text-anchor="middle" class="note-text">verify via KC JWKS</text>
+  <text x="510" y="732" text-anchor="middle" class="note-text">require events.back-channel</text>
+  <text x="510" y="746" text-anchor="middle" class="note-text">require sub or sid</text>
+  <text x="510" y="760" text-anchor="middle" class="note-text">forbid nonce (would be id_token)</text>
+
+  <!-- B-2: BFF -> Redis SMEMBERS -->
+  <line x1="510" y1="790" x2="858" y2="790" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="526" cy="784" r="9" class="step-bg"/><text x="526" y="788" text-anchor="middle" class="step-num">2</text>
+  <text x="684" y="784" text-anchor="middle" class="msg-label" fill="#6d28d9">SMEMBERS userSessions:&lt;sub&gt;  → [ sid1, sid2, … ]</text>
+
+  <!-- B-3: loop DEL + SREM -->
+  <line x1="510" y1="830" x2="858" y2="830" class="msg-store" marker-end="url(#arrow-store)"/>
+  <circle cx="526" cy="824" r="9" class="step-bg"/><text x="526" y="828" text-anchor="middle" class="step-num">3</text>
+  <text x="684" y="824" text-anchor="middle" class="msg-label" fill="#6d28d9">for each sid:  DEL session:sid  +  SREM userSessions:&lt;sub&gt; sid</text>
+
+  <!-- B-4: BFF -> KC 200 -->
+  <line x1="508" y1="870" x2="142" y2="870" class="msg-auth" marker-end="url(#arrow-auth)"/>
+  <circle cx="494" cy="864" r="9" class="step-bg"/><text x="494" y="868" text-anchor="middle" class="step-num">4</text>
+  <text x="325" y="864" text-anchor="middle" class="msg-label">200 OK   (KC retries on non-2xx; status drives retry budget)</text>
+
+  <!-- Footer note -->
+  <g transform="translate(60,940)">
+    <rect class="box" x="0" y="0" width="960" height="36" rx="8" fill="#f8fafc"/>
+    <text x="14" y="22" class="label-sub">Note: KC's local sid is NOT the BFF's session_id. If logout_token carries only sid (no sub), the BFF logs and ignores — strict sid revocation would need explicit sub.</text>
+  </g>
+</svg>

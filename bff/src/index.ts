@@ -9,14 +9,17 @@ const main = async () => {
   const log = createLogger(env);
 
   // §3.1: tracing must start BEFORE the app's modules are imported, so
-  // auto-instrumentations can patch http/express/axios. The dynamic import
-  // below is the rest of the bootstrap.
+  // auto-instrumentations can patch http/express/axios. If you replace the
+  // dynamic imports below with static top-level imports, the http/express
+  // module references will already exist by the time OTEL tries to wrap
+  // them and instrumentation becomes a no-op for those modules.
   startTracing(env);
 
   const { createApp } = await import('./app.js');
   const { AuthStateStore } = await import('./auth/stores/authState.store.js');
   const { BffCodeStore } = await import('./auth/stores/bffCode.store.js');
   const { SessionStore } = await import('./auth/stores/session.store.js');
+  const { UserSessionsStore } = await import('./auth/stores/userSessions.store.js');
   const { InternalJwtIssuer } = await import('./lib/internalJwt.js');
   const { KeycloakClient } = await import('./lib/keycloak.js');
   const { createKeycloakJwtVerifier } = await import('./lib/keycloakJwt.js');
@@ -63,6 +66,7 @@ const main = async () => {
       authStateStore: new AuthStateStore(redis, env.AUTHSTATE_TTL_SECONDS),
       bffCodeStore: new BffCodeStore(redis, env.BFFCODE_TTL_SECONDS),
       sessionStore: new SessionStore(redis, env.SESSION_TTL_SECONDS),
+      userSessionsStore: new UserSessionsStore(redis, env.SESSION_TTL_SECONDS),
       internalJwtIssuer,
       metrics,
       log,
@@ -73,15 +77,42 @@ const main = async () => {
     log.info({ port: env.PORT, env: env.NODE_ENV }, 'bff listening');
   });
 
+  // Graceful shutdown (AUDIT PR-1):
+  //   - stop accepting new connections, drain idle ones
+  //   - wait for in-flight requests to finish (bounded by force timer below)
+  //   - quit redis cleanly so pending commands flush
+  //   - stop OTEL exporter
+  //   - flush pino so the last few error lines hit stdout before exit
+  // The 25s force-exit budget sits just under typical K8s
+  // terminationGracePeriodSeconds=30, so we always exit by our hand, not by
+  // SIGKILL.
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log.info({ signal }, 'shutting down');
-    server.close(() => log.info('http server closed'));
-    redis.disconnect();
-    await stopTracing();
-    setTimeout(() => process.exit(0), 1000).unref();
+    try {
+      server.closeIdleConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      try {
+        await redis.quit();
+      } catch {
+        redis.disconnect();
+      }
+      await stopTracing();
+    } catch (err) {
+      log.error({ err }, 'shutdown encountered an error');
+    } finally {
+      await new Promise<void>((resolve) => log.flush(() => resolve()));
+      process.exit(0);
+    }
   };
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  const force = setTimeout(() => {
+    log.fatal('shutdown force-exit timer elapsed');
+    process.exit(1);
+  }, 25_000).unref();
+  process.on('SIGTERM', () => void shutdown('SIGTERM').finally(() => clearTimeout(force)));
+  process.on('SIGINT', () => void shutdown('SIGINT').finally(() => clearTimeout(force)));
 
   process.on('unhandledRejection', (reason) => {
     log.fatal({ err: reason }, 'unhandledRejection');

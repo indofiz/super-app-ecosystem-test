@@ -20,7 +20,18 @@ export const errorMiddleware =
   (log: Logger, metrics?: MetricsBundle): ErrorRequestHandler =>
   (err, req, res, _next) => {
     if (err instanceof HttpError) {
-      log.warn({ err, code: err.code, status: err.status, path: req.path }, 'http error');
+      // AUDIT S-2: log `detail` server-side only — never put it on the wire.
+      log.warn(
+        {
+          err,
+          code: err.code,
+          status: err.status,
+          path: req.path,
+          // detail can contain zod issues; logger redaction handles secrets.
+          detail: err.detail,
+        },
+        'http error',
+      );
       if (metrics && err.status >= 400 && err.status < 500) {
         const reason = FAILED_AUTH_CODES.has(err.code) ? err.code : 'other';
         metrics.authFailedTotal.inc({ reason });

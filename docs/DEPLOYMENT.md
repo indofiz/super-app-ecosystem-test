@@ -40,6 +40,16 @@ Six containers from the workspace-level `docker-compose.yml`:
 Only **nginx** publishes host ports (`:80`, `:443`). Everything else is
 reachable only inside the Docker network.
 
+> **Dev vs prod compose layout.** The repo has two env templates —
+> `.env.dev.example` (local) and `.env.prod.example` (this guide). It
+> also has a dev-only overlay `docker-compose.override.yml` that exposes
+> Redis/BFF/sample-service to the host for debugging. That overlay is
+> **auto-merged in dev** but **skipped in prod** because
+> `.env.prod.example` sets `COMPOSE_FILE=docker-compose.yml` (Compose
+> reads only the listed files when that variable is set). Net effect:
+> every `docker compose ...` command in this guide works as written
+> without any `-f` flag, and host ports stay locked down on the VPS.
+
 ---
 
 ## 1. Sizing & prerequisites
@@ -253,10 +263,15 @@ Visit the Keycloak admin console:
 
 ```bash
 cd ~/super-app
-cp .env.example .env
+cp .env.prod.example .env
 chmod 600 .env   # nobody else on the box can read it
 nano .env        # or your editor of choice
 ```
+
+`.env.prod.example` already sets `COMPOSE_FILE=docker-compose.yml` —
+keep that line. It makes Compose ignore `docker-compose.override.yml`
+(the dev-only overlay that publishes Redis/BFF/sample-service on the
+host) without you needing a `-f` flag on every command.
 
 Fill these. **Every value below has a `<PLACEHOLDER>`** — leaving a
 placeholder will make the BFF fail at startup with a Zod validation error.

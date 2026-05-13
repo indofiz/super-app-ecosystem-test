@@ -1,8 +1,13 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+/// Encrypted at-rest storage for the two things mobile is allowed to hold:
+/// the BFF-minted internal JWT (short-lived bearer) and the opaque
+/// session_id that the BFF uses to look up the Keycloak refresh_token in
+/// Redis. The refresh_token itself never reaches the device.
 class SecureStore {
   SecureStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage(
+      : _storage = storage ??
+            const FlutterSecureStorage(
               aOptions: AndroidOptions(encryptedSharedPreferences: true),
               iOptions: IOSOptions(
                 accessibility: KeychainAccessibility.first_unlock,
@@ -12,7 +17,6 @@ class SecureStore {
   static const _kAccessToken = 'access_token';
   static const _kSessionId = 'session_id';
   static const _kExpiresAt = 'expires_at';
-  static const _kIdToken = 'id_token';
 
   final FlutterSecureStorage _storage;
 
@@ -20,18 +24,18 @@ class SecureStore {
     required String accessToken,
     required String sessionId,
     required DateTime expiresAt,
-    String? idToken,
   }) async {
     await Future.wait([
       _storage.write(key: _kAccessToken, value: accessToken),
       _storage.write(key: _kSessionId, value: sessionId),
       _storage.write(
-          key: _kExpiresAt, value: expiresAt.toUtc().toIso8601String()),
-      if (idToken != null) _storage.write(key: _kIdToken, value: idToken),
+        key: _kExpiresAt,
+        value: expiresAt.toUtc().toIso8601String(),
+      ),
     ]);
   }
 
-  Future<({String accessToken, String sessionId, DateTime expiresAt, String? idToken})?>
+  Future<({String accessToken, String sessionId, DateTime expiresAt})?>
       readSession() async {
     final accessToken = await _storage.read(key: _kAccessToken);
     final sessionId = await _storage.read(key: _kSessionId);
@@ -43,7 +47,6 @@ class SecureStore {
       accessToken: accessToken,
       sessionId: sessionId,
       expiresAt: DateTime.parse(expiresAtRaw),
-      idToken: await _storage.read(key: _kIdToken),
     );
   }
 
@@ -52,7 +55,6 @@ class SecureStore {
       _storage.delete(key: _kAccessToken),
       _storage.delete(key: _kSessionId),
       _storage.delete(key: _kExpiresAt),
-      _storage.delete(key: _kIdToken),
     ]);
   }
 }

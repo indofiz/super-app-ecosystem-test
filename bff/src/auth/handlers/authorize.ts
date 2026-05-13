@@ -1,7 +1,7 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import type { Env } from '../../config/env.js';
-import { badRequest } from '../../lib/errors.js';
+import { badRequest, badRequestFromZod } from '../../lib/errors.js';
 import { randomUrlSafe } from '../../lib/ids.js';
 import type { KeycloakClient } from '../../lib/keycloak.js';
 import { challengeFromVerifier, generateVerifier, parsePkceMethod } from '../../lib/pkce.js';
@@ -26,7 +26,7 @@ export const makeAuthorizeHandler = (deps: {
     try {
       const parsed = QuerySchema.safeParse(req.query);
       if (!parsed.success) {
-        throw badRequest('invalid_request', parsed.error.issues[0]?.message ?? 'Invalid query');
+        throw badRequestFromZod(parsed.error, 'Invalid query');
       }
       const q = parsed.data;
 

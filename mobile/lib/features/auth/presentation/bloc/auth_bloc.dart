@@ -1,19 +1,16 @@
 import 'dart:async';
 
 import 'package:equatable/equatable.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/logging/auth_log.dart';
 import '../../domain/auth_repository.dart';
 import '../../domain/auth_session.dart';
 
 part 'auth_event.dart';
 part 'auth_state.dart';
 
-void _log(String msg) {
-  // ignore: avoid_print
-  if (kDebugMode) print('[AUTH/bloc] $msg');
-}
+void _log(String msg) => authLog('bloc', msg);
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   AuthBloc({required this.authRepository}) : super(const AuthState.unknown()) {
@@ -71,6 +68,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final session = await authRepository.refresh();
       emit(AuthState.authenticated(session));
     } on AuthFailure catch (e) {
+      // No retry-after-refresh-failed: a dead refresh forces the user back
+      // through SSO. The login screen will show this message.
       emit(AuthState.unauthenticated(errorMessage: e.message));
     }
   }

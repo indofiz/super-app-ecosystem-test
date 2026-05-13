@@ -1,15 +1,10 @@
 import type { RequestHandler } from 'express';
 import { unauthorized } from '../lib/errors.js';
 import type { InternalJwtIssuer, InternalJwtVerifiedClaims } from '../lib/internalJwt.js';
+import type { Logger } from '../lib/logger.js';
 
-// Augment Express's Request with the verified claims from the bearer.
-// Routes that mount `requireSessionBearer` can read `req.claims!` safely;
-// routes that don't will see `undefined`.
-declare module 'express-serve-static-core' {
-  interface Request {
-    claims?: InternalJwtVerifiedClaims;
-  }
-}
+// Request augmentation for `claims` lives in `src/types/express.d.ts`
+// alongside `req.id` (AUDIT M-3).
 
 /**
  * Bearer-required middleware for /refresh, /logout, /me. Closes
@@ -26,6 +21,7 @@ declare module 'express-serve-static-core' {
 export const requireSessionBearer = (
   issuer: InternalJwtIssuer,
   mode: 'strict' | 'allowExpired',
+  log?: Logger,
 ): RequestHandler => {
   return async (req, _res, next) => {
     try {
@@ -40,7 +36,17 @@ export const requireSessionBearer = (
           mode === 'allowExpired'
             ? await issuer.verifyAllowingExpired(token)
             : await issuer.verify(token);
-      } catch {
+      } catch (verifyErr) {
+        // AUDIT M-5: collapse to a generic 401 on the wire (no oracle for
+        // attackers) but log the underlying reason so ops can correlate
+        // support tickets. Pino redaction strips the token itself.
+        log?.debug(
+          {
+            err: verifyErr instanceof Error ? { name: verifyErr.name, message: verifyErr.message } : verifyErr,
+            mode,
+          },
+          'bearer verify failed',
+        );
         throw unauthorized('invalid_token', 'Bearer verification failed');
       }
       req.claims = claims;

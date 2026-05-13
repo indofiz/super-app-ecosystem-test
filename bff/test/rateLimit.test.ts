@@ -7,6 +7,7 @@ import { createApp } from '../src/app.js';
 import { AuthStateStore } from '../src/auth/stores/authState.store.js';
 import { BffCodeStore } from '../src/auth/stores/bffCode.store.js';
 import { SessionStore } from '../src/auth/stores/session.store.js';
+import { UserSessionsStore } from '../src/auth/stores/userSessions.store.js';
 import type { Env } from '../src/config/env.js';
 import { InternalJwtIssuer } from '../src/lib/internalJwt.js';
 import type { KeycloakClient, OidcDiscovery } from '../src/lib/keycloak.js';
@@ -48,6 +49,8 @@ const env: Env = {
   BFF_INTERNAL_JWT_TTL_SECONDS: 300,
   BFF_INTERNAL_JWT_ISSUER: 'super-app-bff',
   BFF_INTERNAL_JWT_AUDIENCE: 'super-app-services',
+  TRUST_PROXY: 'loopback',
+  REQUEST_TIMEOUT_MS: 12_000,
 };
 
 const baseDiscovery: OidcDiscovery = {
@@ -119,6 +122,7 @@ const buildAppWithRedis = async (redis: Redis) => {
       authStateStore: new AuthStateStore(redis, env.AUTHSTATE_TTL_SECONDS),
       bffCodeStore: new BffCodeStore(redis, env.BFFCODE_TTL_SECONDS),
       sessionStore: new SessionStore(redis, env.SESSION_TTL_SECONDS),
+      userSessionsStore: new UserSessionsStore(redis, env.SESSION_TTL_SECONDS),
       internalJwtIssuer,
     },
   });
@@ -132,7 +136,7 @@ describe('rate limiter (Redis-backed) — §3.5', () => {
   });
 
   it('/auth/token returns 429 after the 10/min limit is exceeded', async () => {
-    const redis = installCallShim(new IoRedisMock() as unknown as Redis);
+    const redis = installCallShim(new IoRedisMock());
     const app = await buildAppWithRedis(redis);
     let last = 0;
     // First 10 are allowed (handler will respond 4xx on the bad payload, but
@@ -148,7 +152,7 @@ describe('rate limiter (Redis-backed) — §3.5', () => {
   it('two app instances sharing a Redis instance share the same counter', async () => {
     // Proves the limiter is global across replicas — the failure mode of
     // the previous in-memory store was that each replica had its own count.
-    const redis = installCallShim(new IoRedisMock() as unknown as Redis);
+    const redis = installCallShim(new IoRedisMock());
     const appA = await buildAppWithRedis(redis);
     const appB = await buildAppWithRedis(redis);
     // 6 calls on A + 5 calls on B = 11 total → 12th should be 429.
@@ -168,7 +172,7 @@ describe('rate limiter (Redis-backed) — §3.5', () => {
   it('different endpoints get independent counters via key prefix', async () => {
     // Filling /token's bucket must not affect /authorize. Each limiter has
     // its own Redis prefix (rl:token:, rl:authorize:, ...).
-    const redis = installCallShim(new IoRedisMock() as unknown as Redis);
+    const redis = installCallShim(new IoRedisMock());
     const app = await buildAppWithRedis(redis);
     for (let i = 0; i < 11; i++) {
       await request(app).post('/auth/token').send({});

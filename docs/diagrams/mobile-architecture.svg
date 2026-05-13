@@ -1,0 +1,237 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 900" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>Mobile Architecture — Flutter / Bloc / Dio</title>
+  <desc>The mobile app is built as a copy-into-real-project auth template. Layers from top: UI → AuthBloc → AuthRepository (mock or BFF) → AppAuth + Dio + SecureStore. The sessionChanges stream wires both the bloc and the Dio ApiClient.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-stream" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0369a1"/>
+    </marker>
+    <marker id="arrow-auth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+    <style>
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .section-title { font-weight:700; font-size:15px; fill:#0f172a; }
+
+      .layer-band  { fill:#f1f5f9; stroke:#94a3b8; stroke-width:1; rx:10; }
+      .layer-label { font-weight:700; font-size:12px; fill:#475569; }
+
+      .box-ui      { fill:#f0f9ff; stroke:#0369a1; stroke-width:1.5; rx:8; }
+      .box-bloc    { fill:#fae8ff; stroke:#a21caf; stroke-width:1.5; rx:8; }
+      .box-repo    { fill:#fef3c7; stroke:#b45309; stroke-width:1.5; rx:8; }
+      .box-mock    { fill:#fef3c7; stroke:#b45309; stroke-width:1.5; stroke-dasharray:5,4; rx:8; }
+      .box-data    { fill:#dcfce7; stroke:#15803d; stroke-width:1.5; rx:8; }
+      .box-secure  { fill:#ede9fe; stroke:#6d28d9; stroke-width:1.5; rx:8; }
+      .box-external{ fill:#fde2e7; stroke:#9f1239; stroke-width:1.5; stroke-dasharray:5,4; rx:8; }
+
+      .box-title   { font-weight:700; font-size:12px; fill:#0f172a; }
+      .box-sub     { font-size:10.5px; fill:#475569; }
+      .box-code    { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:10px; fill:#1f2937; }
+
+      .edge        { stroke:#475569; stroke-width:1.5; fill:none; }
+      .edge-stream { stroke:#0369a1; stroke-width:1.8; fill:none; stroke-dasharray:6,3; }
+      .edge-auth   { stroke:#b45309; stroke-width:1.8; fill:none; }
+      .edge-data   { stroke:#1d4ed8; stroke-width:1.8; fill:none; }
+
+      .pill        { rx:8; ry:8; }
+      .pill-toggle { fill:#fef9c3; stroke:#a16207; }
+      .pill-text   { font-size:10.5px; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">Mobile Architecture — Flutter / Bloc / Dio</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">Designed to be copy-into-real-projects. Auth logic lives in `core/` + `features/auth/` and depends on no UI specifics.</text>
+
+  <!-- Layer: UI -->
+  <rect class="layer-band" x="40" y="76" width="1000" height="120"/>
+  <text x="56" y="98" class="layer-label">UI layer  (features/auth/presentation, features/home, features/sample)</text>
+
+  <rect class="box-ui" x="60"  y="110" width="180" height="70"/>
+  <text x="150" y="130" text-anchor="middle" class="box-title">SmartApp</text>
+  <text x="150" y="146" text-anchor="middle" class="box-sub">MultiRepositoryProvider</text>
+  <text x="150" y="160" text-anchor="middle" class="box-sub">+ BlocProvider</text>
+  <text x="150" y="174" text-anchor="middle" class="box-sub">+ MaterialApp.router</text>
+
+  <rect class="box-ui" x="270" y="110" width="180" height="70"/>
+  <text x="360" y="130" text-anchor="middle" class="box-title">AppRouter</text>
+  <text x="360" y="146" text-anchor="middle" class="box-sub">go_router</text>
+  <text x="360" y="160" text-anchor="middle" class="box-sub">redirects on AuthState</text>
+  <text x="360" y="174" text-anchor="middle" class="box-sub">via BlocListener</text>
+
+  <rect class="box-ui" x="480" y="110" width="170" height="70"/>
+  <text x="565" y="130" text-anchor="middle" class="box-title">SplashScreen</text>
+  <text x="565" y="146" text-anchor="middle" class="box-sub">while AuthBloc</text>
+  <text x="565" y="160" text-anchor="middle" class="box-sub">state == unknown</text>
+
+  <rect class="box-ui" x="670" y="110" width="170" height="70"/>
+  <text x="755" y="130" text-anchor="middle" class="box-title">LoginScreen</text>
+  <text x="755" y="146" text-anchor="middle" class="box-sub">dispatch</text>
+  <text x="755" y="160" text-anchor="middle" class="box-sub">AuthLoginRequested</text>
+
+  <rect class="box-ui" x="860" y="110" width="170" height="70"/>
+  <text x="945" y="130" text-anchor="middle" class="box-title">HomeScreen</text>
+  <text x="945" y="146" text-anchor="middle" class="box-sub">decoded JWT inspector</text>
+  <text x="945" y="160" text-anchor="middle" class="box-sub">+ GET /api/profile</text>
+
+  <!-- Layer: State -->
+  <rect class="layer-band" x="40" y="210" width="1000" height="120"/>
+  <text x="56" y="232" class="layer-label">State layer  (features/auth/presentation/bloc)</text>
+
+  <rect class="box-bloc" x="60"  y="244" width="320" height="76"/>
+  <text x="220" y="266" text-anchor="middle" class="box-title">AuthBloc  (Bloc&lt;AuthEvent, AuthState&gt;)</text>
+  <text x="76" y="284" class="box-code">on&lt;AuthStarted&gt; → restoreSession()</text>
+  <text x="76" y="298" class="box-code">on&lt;AuthLoginRequested&gt; → login()</text>
+  <text x="76" y="312" class="box-code">on&lt;AuthLogoutRequested&gt; → logout()</text>
+
+  <rect class="box-bloc" x="400" y="244" width="220" height="76"/>
+  <text x="510" y="266" text-anchor="middle" class="box-title">AuthState</text>
+  <text x="416" y="284" class="box-code">unknown</text>
+  <text x="416" y="298" class="box-code">unauthenticated(errorMessage?)</text>
+  <text x="416" y="312" class="box-code">authenticated(AuthSession)</text>
+
+  <rect class="box-bloc" x="640" y="244" width="220" height="76"/>
+  <text x="750" y="266" text-anchor="middle" class="box-title">_AuthSessionChanged</text>
+  <text x="656" y="284" class="box-code">internal event fired from</text>
+  <text x="656" y="298" class="box-code">AuthRepository.sessionChanges</text>
+  <text x="656" y="312" class="box-code">  (keeps bloc + storage aligned)</text>
+
+  <!-- Layer: Domain / Repository -->
+  <rect class="layer-band" x="40" y="344" width="1000" height="170"/>
+  <text x="56" y="366" class="layer-label">Domain + Repository  (features/auth/domain, data)</text>
+
+  <rect class="box-repo" x="60"  y="378" width="320" height="120"/>
+  <text x="220" y="400" text-anchor="middle" class="box-title">AuthRepository  (abstract)</text>
+  <text x="76" y="418" class="box-code">restoreSession() : AuthSession?</text>
+  <text x="76" y="432" class="box-code">login() : AuthSession</text>
+  <text x="76" y="446" class="box-code">refresh() : AuthSession</text>
+  <text x="76" y="460" class="box-code">logout() : void</text>
+  <text x="76" y="474" class="box-code">getProfile() : UserProfile</text>
+  <text x="76" y="490" class="box-code">sessionChanges : Stream&lt;AuthSession?&gt;</text>
+
+  <rect class="box-mock" x="400" y="378" width="280" height="120"/>
+  <text x="540" y="400" text-anchor="middle" class="box-title">MockAuthRepository</text>
+  <text x="416" y="420" class="box-sub">USE_MOCK_AUTH=true → screen-only loop</text>
+  <text x="416" y="436" class="box-sub">no Keycloak, no BFF, no network</text>
+  <text x="416" y="452" class="box-sub">load-bearing — keeps UI work unblocked</text>
+  <text x="416" y="468" class="box-sub">when the backend isn't running</text>
+  <text x="416" y="488" class="box-sub" fill="#9f1239" font-weight="700">selected by AuthRepositoryFactory</text>
+
+  <rect class="box-repo" x="700" y="378" width="320" height="120"/>
+  <text x="860" y="400" text-anchor="middle" class="box-title">BffAuthRepository</text>
+  <text x="716" y="420" class="box-sub">USE_MOCK_AUTH=false → real BFF</text>
+  <text x="716" y="436" class="box-code">FlutterAppAuth (PKCE)</text>
+  <text x="716" y="450" class="box-code">  endpoint = config.bffBaseUrl, NOT Keycloak</text>
+  <text x="716" y="466" class="box-code">BffAuthApi (Dio) for /refresh, /logout, /me</text>
+  <text x="716" y="482" class="box-code">SecureStore for accessToken + sessionId</text>
+
+  <!-- Layer: Infra -->
+  <rect class="layer-band" x="40" y="528" width="1000" height="170"/>
+  <text x="56" y="550" class="layer-label">Infra  (core/http, core/storage, core/config)</text>
+
+  <rect class="box-data" x="60"  y="562" width="220" height="124"/>
+  <text x="170" y="584" text-anchor="middle" class="box-title">ApiClient (Dio)</text>
+  <text x="76" y="602" class="box-sub">baseUrl = bffBaseUrl</text>
+  <text x="76" y="618" class="box-code">_AuthInterceptor</text>
+  <text x="86" y="632" class="box-sub">attaches Bearer from _TokenHolder</text>
+  <text x="76" y="648" class="box-code">_RefreshInterceptor</text>
+  <text x="86" y="662" class="box-sub">on first 401 → refresh + retry</text>
+  <text x="86" y="676" class="box-sub">dedupe via single-flight Completer</text>
+
+  <rect class="box-secure" x="300" y="562" width="220" height="124"/>
+  <text x="410" y="584" text-anchor="middle" class="box-title">SecureStore</text>
+  <text x="316" y="602" class="box-sub">flutter_secure_storage</text>
+  <text x="316" y="616" class="box-sub">  iOS: Keychain</text>
+  <text x="316" y="630" class="box-sub">  Android: EncryptedSharedPreferences</text>
+  <text x="316" y="650" class="box-code">writeSession / readSession</text>
+  <text x="316" y="664" class="box-code">clear()</text>
+  <text x="316" y="680" class="box-sub">stores only accessToken + sid + expiresAt</text>
+
+  <rect class="box-data" x="540" y="562" width="220" height="124"/>
+  <text x="650" y="584" text-anchor="middle" class="box-title">BffAuthApi</text>
+  <text x="556" y="602" class="box-sub">Dio (separate from ApiClient)</text>
+  <text x="556" y="618" class="box-code">refresh(sessionId, bearer)</text>
+  <text x="556" y="632" class="box-code">logout(sessionId, bearer)</text>
+  <text x="556" y="646" class="box-code">getMe(bearer)</text>
+  <text x="556" y="666" class="box-sub">3-min hard timeout on AppAuth</text>
+  <text x="556" y="680" class="box-sub">round-trip (defends against</text>
+
+  <rect class="box-data" x="780" y="562" width="240" height="124"/>
+  <text x="900" y="584" text-anchor="middle" class="box-title">AppConfig</text>
+  <text x="796" y="602" class="box-sub">flutter_dotenv → .env</text>
+  <text x="796" y="618" class="box-code">USE_MOCK_AUTH</text>
+  <text x="796" y="632" class="box-code">BFF_BASE_URL</text>
+  <text x="796" y="646" class="box-code">OAUTH_CLIENT_ID / REDIRECT_URI</text>
+  <text x="796" y="660" class="box-code">ALLOW_INSECURE_CONNECTIONS</text>
+  <text x="796" y="680" class="box-sub" fill="#9f1239">fail-fast at startup on bad config</text>
+
+  <!-- External -->
+  <rect class="layer-band" x="40" y="712" width="1000" height="80"/>
+  <text x="56" y="734" class="layer-label">External  (HTTPS to the BFF; never to Keycloak)</text>
+
+  <rect class="box-external" x="60"  y="744" width="960" height="40"/>
+  <text x="540" y="768" text-anchor="middle" class="box-title">BFF</text>
+  <text x="180" y="768" class="box-sub">/auth/authorize → /auth/callback</text>
+  <text x="400" y="768" class="box-sub">/auth/token  /auth/refresh  /auth/logout  /auth/me</text>
+  <text x="820" y="768" class="box-sub">/api/* via Kong</text>
+
+  <!-- Wiring arrows -->
+  <!-- AppRouter watches AuthBloc -->
+  <line x1="360" y1="180" x2="220" y2="244" class="edge" marker-end="url(#arrow)"/>
+  <text x="252" y="216" class="label-sub" fill="#475569">listens</text>
+
+  <!-- Login/Home dispatch to AuthBloc -->
+  <line x1="755" y1="180" x2="240" y2="244" class="edge" marker-end="url(#arrow)"/>
+
+  <!-- AuthBloc → AuthRepository -->
+  <line x1="220" y1="320" x2="220" y2="378" class="edge" marker-end="url(#arrow)"/>
+  <text x="232" y="350" class="label-sub" fill="#475569">calls</text>
+
+  <!-- sessionChanges stream up to AuthBloc -->
+  <line x1="280" y1="378" x2="280" y2="320" class="edge-stream" marker-end="url(#arrow-stream)"/>
+  <text x="290" y="350" class="label-sub" fill="#0369a1">sessionChanges</text>
+
+  <!-- sessionChanges → ApiClient TokenHolder -->
+  <path d="M 320 378 C 240 380 200 480 170 562" class="edge-stream" marker-end="url(#arrow-stream)"/>
+
+  <!-- Factory choice arrow -->
+  <line x1="380" y1="438" x2="398" y2="438" class="edge" marker-end="url(#arrow)"/>
+  <line x1="680" y1="438" x2="698" y2="438" class="edge" marker-end="url(#arrow)"/>
+
+  <!-- Repository → infra boxes -->
+  <line x1="860" y1="498" x2="650" y2="562" class="edge-auth" marker-end="url(#arrow-auth)"/>
+  <text x="760" y="540" text-anchor="middle" class="label-sub" fill="#b45309">/refresh, /logout, /me</text>
+
+  <line x1="780" y1="498" x2="410" y2="562" class="edge" marker-end="url(#arrow)"/>
+  <line x1="900" y1="498" x2="900" y2="562" class="edge" marker-end="url(#arrow)"/>
+
+  <!-- ApiClient → BFF (data plane) -->
+  <line x1="170" y1="686" x2="170" y2="744" class="edge-data" marker-end="url(#arrow-data)"/>
+  <text x="200" y="718" class="label-sub" fill="#1d4ed8">/api/* + Bearer</text>
+
+  <!-- BffAuthApi → BFF (auth plane) -->
+  <line x1="650" y1="686" x2="650" y2="744" class="edge-auth" marker-end="url(#arrow-auth)"/>
+  <text x="688" y="718" class="label-sub" fill="#b45309">/auth/*</text>
+
+  <!-- Repository factory note -->
+  <rect class="pill pill-toggle" x="400" y="354" width="280" height="16"/>
+  <text x="540" y="366" text-anchor="middle" class="pill-text">AuthRepositoryFactory.create(config) picks one</text>
+
+  <!-- Legend strip -->
+  <g transform="translate(40,816)">
+    <line x1="0" y1="0" x2="40" y2="0" class="edge" marker-end="url(#arrow)"/>
+    <text x="48" y="4" class="label-sub">method call</text>
+    <line x1="180" y1="0" x2="220" y2="0" class="edge-stream" marker-end="url(#arrow-stream)"/>
+    <text x="228" y="4" class="label-sub">stream emit (sessionChanges)</text>
+    <line x1="440" y1="0" x2="480" y2="0" class="edge-auth" marker-end="url(#arrow-auth)"/>
+    <text x="488" y="4" class="label-sub">auth-plane HTTP</text>
+    <line x1="620" y1="0" x2="660" y2="0" class="edge-data" marker-end="url(#arrow-data)"/>
+    <text x="668" y="4" class="label-sub">data-plane HTTP</text>
+  </g>
+</svg>

@@ -1,0 +1,191 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 900" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>BFF Redis Keyspace</title>
+  <desc>Four key families: authstate (10m, single-use) and bffcode (5m, single-use) are short-lived OAuth handshake state; session (30d, slid by /me) holds the refresh_token + profile; userSessions is a per-user index used by back-channel logout to find every session for a given sub.</desc>
+
+  <defs>
+    <style>
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .section-title { font-weight:700; font-size:15px; fill:#0f172a; }
+
+      .keybox      { fill:#ffffff; stroke:#6d28d9; stroke-width:1.8; rx:12; }
+      .keybox-soft { fill:#ede9fe; opacity:0.4; }
+
+      .key-name    { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:14px; font-weight:700; fill:#4c1d95; }
+      .key-purpose { font-size:11px; fill:#581c87; font-style:italic; }
+
+      .pill        { rx:10; ry:10; }
+      .pill-string { fill:#dcfce7; stroke:#15803d; }
+      .pill-set    { fill:#dbeafe; stroke:#1d4ed8; }
+      .pill-ttl    { fill:#fef3c7; stroke:#b45309; }
+      .pill-text   { font-size:11px; font-weight:700; }
+
+      .sect-label  { font-size:11px; font-weight:700; fill:#0f172a; }
+      .sect-val    { font-size:11px; fill:#1f2937; }
+
+      .value-block { fill:#f8fafc; stroke:#cbd5e1; stroke-width:1; rx:6; }
+      .value-text  { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:10.5px; fill:#0f172a; }
+
+      .note        { fill:#fef9c3; stroke:#a16207; stroke-width:1; rx:6; }
+      .note-text   { font-size:11px; fill:#713f12; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">BFF Redis Keyspace</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">All values are JSON strings except userSessions, which is a Redis SET. Reads/writes happen only inside the BFF process.</text>
+
+  <!-- BOX 1: authstate -->
+  <g transform="translate(40,70)">
+    <rect class="keybox" x="0" y="0" width="500" height="350"/>
+    <rect class="keybox-soft" x="0" y="0" width="500" height="44"/>
+    <text x="16" y="28" class="key-name">authstate:&lt;bff_state&gt;</text>
+    <text x="16" y="60" class="key-purpose">App PKCE + deeplink, generated at /authorize, consumed at /callback</text>
+
+    <!-- Pills -->
+    <rect class="pill pill-string" x="16" y="70" width="60" height="18"/>
+    <text x="46" y="84" text-anchor="middle" class="pill-text" fill="#15803d">STRING</text>
+    <rect class="pill pill-ttl" x="84" y="70" width="74" height="18"/>
+    <text x="121" y="84" text-anchor="middle" class="pill-text" fill="#b45309">TTL 10 min</text>
+    <rect class="pill pill-ttl" x="166" y="70" width="80" height="18"/>
+    <text x="206" y="84" text-anchor="middle" class="pill-text" fill="#b45309">SINGLE-USE</text>
+
+    <!-- Writers/readers -->
+    <text x="16" y="116" class="sect-label">Written by</text>
+    <text x="120" y="116" class="sect-val">/auth/authorize  (SET EX TTL)</text>
+
+    <text x="16" y="136" class="sect-label">Consumed by</text>
+    <text x="120" y="136" class="sect-val">/auth/callback  (GETDEL — atomic)</text>
+
+    <text x="16" y="156" class="sect-label">Auto-expires</text>
+    <text x="120" y="156" class="sect-val">if user abandons login partway</text>
+
+    <!-- Value shape -->
+    <text x="16" y="184" class="sect-label">Value shape</text>
+    <rect class="value-block" x="16" y="194" width="468" height="142"/>
+    <text x="28" y="212" class="value-text">{</text>
+    <text x="40" y="226" class="value-text">"appCodeChallenge": "&lt;S256 of APPCV&gt;",</text>
+    <text x="40" y="240" class="value-text">"appRedirectUri":   "id.go.pangkalpinangkota...:/oauth2redirect",</text>
+    <text x="40" y="254" class="value-text">"appState":         "&lt;opaque from app&gt;",</text>
+    <text x="40" y="268" class="value-text">"appClientId":      "super-app-eco",</text>
+    <text x="40" y="282" class="value-text">"bffCodeVerifier":  "&lt;BFFCV — BFF's PKCE for KC&gt;"</text>
+    <text x="28" y="296" class="value-text">}</text>
+    <text x="28" y="320" class="label-sub" fill="#581c87">Bound to one in-flight authorize attempt; not a session.</text>
+  </g>
+
+  <!-- BOX 2: bffcode -->
+  <g transform="translate(560,70)">
+    <rect class="keybox" x="0" y="0" width="480" height="350"/>
+    <rect class="keybox-soft" x="0" y="0" width="480" height="44"/>
+    <text x="16" y="28" class="key-name">bffcode:&lt;bff_authcode&gt;</text>
+    <text x="16" y="60" class="key-purpose">Tokens received from Keycloak, awaiting /auth/token exchange</text>
+
+    <rect class="pill pill-string" x="16" y="70" width="60" height="18"/>
+    <text x="46" y="84" text-anchor="middle" class="pill-text" fill="#15803d">STRING</text>
+    <rect class="pill pill-ttl" x="84" y="70" width="74" height="18"/>
+    <text x="121" y="84" text-anchor="middle" class="pill-text" fill="#b45309">TTL 5 min</text>
+    <rect class="pill pill-ttl" x="166" y="70" width="80" height="18"/>
+    <text x="206" y="84" text-anchor="middle" class="pill-text" fill="#b45309">SINGLE-USE</text>
+
+    <text x="16" y="116" class="sect-label">Written by</text>
+    <text x="120" y="116" class="sect-val">/auth/callback  (after KC exchange + id_token verify)</text>
+
+    <text x="16" y="136" class="sect-label">Consumed by</text>
+    <text x="120" y="136" class="sect-val">/auth/token  (GETDEL — atomic)</text>
+
+    <text x="16" y="156" class="sect-label">Auto-expires</text>
+    <text x="120" y="156" class="sect-val">if app never POSTs /auth/token</text>
+
+    <text x="16" y="184" class="sect-label">Value shape</text>
+    <rect class="value-block" x="16" y="194" width="448" height="142"/>
+    <text x="28" y="212" class="value-text">{</text>
+    <text x="40" y="226" class="value-text">"accessToken":  "&lt;KC access_token&gt;",</text>
+    <text x="40" y="240" class="value-text">"refreshToken": "&lt;KC refresh_token&gt;",</text>
+    <text x="40" y="254" class="value-text">"idToken":      "&lt;KC id_token&gt;",</text>
+    <text x="40" y="268" class="value-text">"sub":          "&lt;kc user uuid&gt;",</text>
+    <text x="40" y="282" class="value-text">"appCodeChallenge","appRedirectUri","appClientId"</text>
+    <text x="28" y="296" class="value-text">}</text>
+    <text x="28" y="320" class="label-sub" fill="#581c87">Holds the only KC tokens at rest outside the BFF process.</text>
+  </g>
+
+  <!-- BOX 3: session -->
+  <g transform="translate(40,440)">
+    <rect class="keybox" x="0" y="0" width="500" height="380"/>
+    <rect class="keybox-soft" x="0" y="0" width="500" height="44"/>
+    <text x="16" y="28" class="key-name">session:&lt;session_id&gt;</text>
+    <text x="16" y="60" class="key-purpose">Long-lived session record: refresh_token + cached profile</text>
+
+    <rect class="pill pill-string" x="16" y="70" width="60" height="18"/>
+    <text x="46" y="84" text-anchor="middle" class="pill-text" fill="#15803d">STRING</text>
+    <rect class="pill pill-ttl" x="84" y="70" width="80" height="18"/>
+    <text x="124" y="84" text-anchor="middle" class="pill-text" fill="#b45309">TTL 30 days</text>
+    <rect class="pill pill-ttl" x="172" y="70" width="90" height="18"/>
+    <text x="217" y="84" text-anchor="middle" class="pill-text" fill="#b45309">slid by /me</text>
+
+    <text x="16" y="116" class="sect-label">Written by</text>
+    <text x="120" y="116" class="sect-val">/auth/token (initial); /auth/refresh (rotate refresh_token + profile)</text>
+
+    <text x="16" y="136" class="sect-label">Read by</text>
+    <text x="120" y="136" class="sect-val">/auth/refresh, /auth/logout, /auth/me</text>
+
+    <text x="16" y="156" class="sect-label">TTL slid by</text>
+    <text x="120" y="156" class="sect-val">/auth/me (touch — keeps active users alive without /refresh)</text>
+
+    <text x="16" y="176" class="sect-label">Deleted by</text>
+    <text x="120" y="176" class="sect-val">/auth/logout; /auth/refresh on KC invalid_grant; back-channel-logout</text>
+
+    <text x="16" y="206" class="sect-label">Value shape</text>
+    <rect class="value-block" x="16" y="216" width="468" height="142"/>
+    <text x="28" y="234" class="value-text">{</text>
+    <text x="40" y="248" class="value-text">"refreshToken":  "&lt;KC refresh_token — rotated on /refresh&gt;",</text>
+    <text x="40" y="262" class="value-text">"sub":           "&lt;kc user uuid&gt;",</text>
+    <text x="40" y="276" class="value-text">"appClientId":   "super-app-eco",</text>
+    <text x="40" y="290" class="value-text">"createdAt":     "2026-05-13T03:12:00Z",</text>
+    <text x="40" y="304" class="value-text">"lastUsedAt":    "2026-05-13T08:45:11Z",</text>
+    <text x="40" y="318" class="value-text">"profile":       { username, email, roles[ ] }</text>
+    <text x="28" y="332" class="value-text">}</text>
+  </g>
+
+  <!-- BOX 4: userSessions -->
+  <g transform="translate(560,440)">
+    <rect class="keybox" x="0" y="0" width="480" height="380"/>
+    <rect class="keybox-soft" x="0" y="0" width="480" height="44"/>
+    <text x="16" y="28" class="key-name">userSessions:&lt;sub&gt;</text>
+    <text x="16" y="60" class="key-purpose">Per-user index: all live session_ids for one Keycloak sub</text>
+
+    <rect class="pill pill-set" x="16" y="70" width="44" height="18"/>
+    <text x="38" y="84" text-anchor="middle" class="pill-text" fill="#1d4ed8">SET</text>
+    <rect class="pill pill-ttl" x="68" y="70" width="86" height="18"/>
+    <text x="111" y="84" text-anchor="middle" class="pill-text" fill="#b45309">TTL ≤ 30 days</text>
+    <rect class="pill pill-ttl" x="162" y="70" width="116" height="18"/>
+    <text x="220" y="84" text-anchor="middle" class="pill-text" fill="#b45309">refreshed with session</text>
+
+    <text x="16" y="116" class="sect-label">Written by</text>
+    <text x="120" y="116" class="sect-val">/auth/token  (SADD sid)</text>
+
+    <text x="16" y="136" class="sect-label">Read by</text>
+    <text x="120" y="136" class="sect-val">back-channel-logout  (SMEMBERS)</text>
+
+    <text x="16" y="156" class="sect-label">Deleted from</text>
+    <text x="120" y="156" class="sect-val">/auth/logout, /auth/refresh-on-invalid_grant, back-channel-logout (SREM)</text>
+
+    <text x="16" y="184" class="sect-label">Why it exists</text>
+    <text x="16" y="200" class="sect-val">OIDC back-channel logout only carries `sub`. Without this index the BFF</text>
+    <text x="16" y="214" class="sect-val">would have to SCAN the entire `session:*` keyspace to find sessions to</text>
+    <text x="16" y="228" class="sect-val">purge — O(n) over every active user. The set makes it O(k) for that one sub.</text>
+
+    <text x="16" y="256" class="sect-label">Value shape</text>
+    <rect class="value-block" x="16" y="266" width="448" height="92"/>
+    <text x="28" y="284" class="value-text">{</text>
+    <text x="40" y="300" class="value-text">"&lt;session_id_1&gt;",</text>
+    <text x="40" y="314" class="value-text">"&lt;session_id_2&gt;",</text>
+    <text x="40" y="328" class="value-text">"&lt;session_id_3&gt;"</text>
+    <text x="28" y="342" class="value-text">}   ← members are opaque sids; one entry per device / login</text>
+  </g>
+
+  <!-- Footer note -->
+  <g transform="translate(40,840)">
+    <rect class="note" x="0" y="0" width="1000" height="50"/>
+    <text x="16" y="20" class="note-text">Pattern across all four keys: WRITE on a state-changing handler, single-use codes deleted via atomic GETDEL, long-lived records purged on logout.</text>
+    <text x="16" y="38" class="note-text">No SCAN-style traversal anywhere in the request path — the userSessions set is the only reverse index, and it's tight.</text>
+  </g>
+</svg>

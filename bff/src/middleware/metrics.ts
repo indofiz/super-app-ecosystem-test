@@ -9,8 +9,10 @@ export const metricsMiddleware = (m: MetricsBundle): RequestHandler => {
       const durationS = Number(process.hrtime.bigint() - startNs) / 1e9;
       // req.route?.path is undefined for 404s and middleware-rejected paths.
       // Falling back to req.path keeps the label populated; normalizeRoute
-      // collapses anything not in the allowlist to "other".
-      const route = normalizeRoute(req.route?.path ?? req.path);
+      // collapses anything not in the allowlist to "other". Express types
+      // `req.route` as `any`, so cast through `unknown` for type-aware lint.
+      const routePath = (req.route as { path?: string } | undefined)?.path;
+      const route = normalizeRoute(routePath ?? req.path);
       const method = req.method;
       m.httpRequestsTotal.inc({ route, method, status: String(res.statusCode) });
       m.httpRequestDurationSeconds.observe({ route, method }, durationS);

@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 720" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="13">
+  <title>Pangkal Pinang Super App — Architecture Overview</title>
+  <desc>End-to-end component view: mobile/browser → nginx → BFF or Kong → Keycloak / Redis / sample-service. Shows trust boundaries and which plane (auth vs data) each edge belongs to.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-auth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+    <style>
+      .box { fill:#ffffff; stroke:#334155; stroke-width:1.5; rx:10; }
+      .box-edge   { fill:#f1f5f9; stroke:#334155; }
+      .box-bff    { fill:#fef3c7; stroke:#b45309; }
+      .box-kong   { fill:#dbeafe; stroke:#1d4ed8; }
+      .box-svc    { fill:#dcfce7; stroke:#15803d; }
+      .box-ext    { fill:#fde2e7; stroke:#9f1239; stroke-dasharray:6,4; }
+      .box-store  { fill:#ede9fe; stroke:#6d28d9; }
+      .box-mobile { fill:#f0f9ff; stroke:#0369a1; }
+
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .label-edge  { font-size:11px; fill:#1f2937; }
+
+      .edge-auth  { stroke:#b45309; stroke-width:2; fill:none; }
+      .edge-data  { stroke:#1d4ed8; stroke-width:2; fill:none; }
+      .edge-store { stroke:#6d28d9; stroke-width:2; fill:none; }
+      .edge-soft  { stroke:#475569; stroke-width:1.5; fill:none; stroke-dasharray:5,4; }
+
+      .boundary { fill:none; stroke:#94a3b8; stroke-width:1; stroke-dasharray:3,4; }
+      .boundary-label { font-size:11px; fill:#64748b; font-style:italic; }
+
+      .legend-box { fill:#ffffff; stroke:#cbd5e1; stroke-width:1; }
+    </style>
+  </defs>
+
+  <!-- Title -->
+  <text x="540" y="32" text-anchor="middle" class="label-title" font-size="18">Super App Ecosystem — Architecture Overview</text>
+  <text x="540" y="52" text-anchor="middle" class="label-sub">Auth plane (orange) is rare. Data plane (blue) is every business request. BFF is OFF the hot path after login.</text>
+
+  <!-- Public boundary -->
+  <rect class="boundary" x="40" y="80" width="1000" height="600" rx="14"/>
+  <text x="60" y="100" class="boundary-label">Public internet boundary — only nginx :80/:443 is reachable from outside</text>
+
+  <!-- VPS / Docker network boundary -->
+  <rect class="boundary" x="170" y="120" width="870" height="540" rx="14"/>
+  <text x="190" y="140" class="boundary-label">Docker network (single VPS) — everything below talks over the internal bridge only</text>
+
+  <!-- Mobile -->
+  <g>
+    <rect class="box box-mobile" x="60" y="290" width="100" height="80"/>
+    <text x="110" y="320" text-anchor="middle" class="label-title">Mobile</text>
+    <text x="110" y="338" text-anchor="middle" class="label-sub">Flutter</text>
+    <text x="110" y="354" text-anchor="middle" class="label-sub">SecureStore</text>
+    <text x="110" y="368" text-anchor="middle" class="label-sub">access_token + sid</text>
+  </g>
+
+  <!-- nginx -->
+  <g>
+    <rect class="box box-edge" x="210" y="280" width="140" height="100"/>
+    <text x="280" y="305" text-anchor="middle" class="label-title">nginx</text>
+    <text x="280" y="322" text-anchor="middle" class="label-sub">TLS / rate-limit</text>
+    <text x="280" y="338" text-anchor="middle" class="label-sub">X-Request-Id mint</text>
+    <text x="280" y="354" text-anchor="middle" class="label-sub">/auth → BFF</text>
+    <text x="280" y="370" text-anchor="middle" class="label-sub">/api  → Kong</text>
+  </g>
+
+  <!-- BFF -->
+  <g>
+    <rect class="box box-bff" x="400" y="180" width="170" height="120"/>
+    <text x="485" y="205" text-anchor="middle" class="label-title">BFF</text>
+    <text x="485" y="222" text-anchor="middle" class="label-sub">Express / TypeScript</text>
+    <text x="485" y="240" text-anchor="middle" class="label-sub">PKCE + OAuth ceremony</text>
+    <text x="485" y="256" text-anchor="middle" class="label-sub">Mints RS256 internal JWT</text>
+    <text x="485" y="272" text-anchor="middle" class="label-sub">Holds private key + KC secret</text>
+    <text x="485" y="288" text-anchor="middle" class="label-sub">Auth boundary</text>
+  </g>
+
+  <!-- Kong -->
+  <g>
+    <rect class="box box-kong" x="400" y="380" width="170" height="120"/>
+    <text x="485" y="405" text-anchor="middle" class="label-title">Kong (DB-less)</text>
+    <text x="485" y="422" text-anchor="middle" class="label-sub">Bundled jwt plugin: RS256</text>
+    <text x="485" y="438" text-anchor="middle" class="label-sub">pre-function: iss / aud</text>
+    <text x="485" y="454" text-anchor="middle" class="label-sub">Injects X-User-Id / X-Roles</text>
+    <text x="485" y="470" text-anchor="middle" class="label-sub">Strips Authorization upstream</text>
+    <text x="485" y="486" text-anchor="middle" class="label-sub">Per-user rate limit</text>
+  </g>
+
+  <!-- Redis -->
+  <g>
+    <rect class="box box-store" x="640" y="180" width="160" height="100"/>
+    <text x="720" y="205" text-anchor="middle" class="label-title">Redis</text>
+    <text x="720" y="222" text-anchor="middle" class="label-sub">authstate: 10 m</text>
+    <text x="720" y="238" text-anchor="middle" class="label-sub">bffcode: 5 m</text>
+    <text x="720" y="254" text-anchor="middle" class="label-sub">session: 30 d</text>
+    <text x="720" y="270" text-anchor="middle" class="label-sub">userSessions: index</text>
+  </g>
+
+  <!-- sample-service -->
+  <g>
+    <rect class="box box-svc" x="640" y="400" width="160" height="80"/>
+    <text x="720" y="425" text-anchor="middle" class="label-title">sample-service</text>
+    <text x="720" y="442" text-anchor="middle" class="label-sub">Reads identity from</text>
+    <text x="720" y="458" text-anchor="middle" class="label-sub">X-User-Id / X-Roles</text>
+    <text x="720" y="474" text-anchor="middle" class="label-sub">No auth code of its own</text>
+  </g>
+
+  <!-- Keycloak (external) -->
+  <g>
+    <rect class="box box-ext" x="860" y="180" width="160" height="100"/>
+    <text x="940" y="205" text-anchor="middle" class="label-title">Keycloak (SSO)</text>
+    <text x="940" y="222" text-anchor="middle" class="label-sub">EXTERNAL</text>
+    <text x="940" y="238" text-anchor="middle" class="label-sub">sso.pangkalpinangkota</text>
+    <text x="940" y="254" text-anchor="middle" class="label-sub">.go.id/realms/pangkalpinang</text>
+    <text x="940" y="270" text-anchor="middle" class="label-sub">Issues KC tokens to BFF only</text>
+  </g>
+
+  <!-- nginx-exporter -->
+  <g>
+    <rect class="box box-edge" x="860" y="400" width="160" height="70"/>
+    <text x="940" y="425" text-anchor="middle" class="label-title">nginx-exporter</text>
+    <text x="940" y="442" text-anchor="middle" class="label-sub">Prometheus scrape</text>
+    <text x="940" y="458" text-anchor="middle" class="label-sub">Internal-only</text>
+  </g>
+
+  <!-- Edges -->
+  <!-- mobile <-> nginx (both planes) -->
+  <line x1="160" y1="330" x2="208" y2="330" class="edge-auth" marker-end="url(#arrow-auth)"/>
+  <text x="184" y="322" text-anchor="middle" class="label-edge" fill="#b45309">/auth/*</text>
+  <line x1="160" y1="346" x2="208" y2="346" class="edge-data" marker-end="url(#arrow-data)"/>
+  <text x="184" y="362" text-anchor="middle" class="label-edge" fill="#1d4ed8">/api/* + Bearer</text>
+
+  <!-- nginx -> BFF (auth) -->
+  <path d="M348,300 C 374,260 384,230 400,225" class="edge-auth" marker-end="url(#arrow-auth)"/>
+  <text x="396" y="252" class="label-edge" fill="#b45309">/auth/* → :3000</text>
+
+  <!-- nginx -> Kong (data) -->
+  <path d="M348,360 C 374,400 384,420 400,430" class="edge-data" marker-end="url(#arrow-data)"/>
+  <text x="396" y="402" class="label-edge" fill="#1d4ed8">/api/* → :8000</text>
+
+  <!-- BFF -> Redis -->
+  <line x1="570" y1="230" x2="638" y2="230" class="edge-store" marker-end="url(#arrow)"/>
+  <text x="604" y="222" text-anchor="middle" class="label-edge" fill="#6d28d9">sessions / codes</text>
+
+  <!-- BFF -> Keycloak (auth, external) -->
+  <line x1="570" y1="265" x2="858" y2="230" class="edge-auth" marker-end="url(#arrow-auth)"/>
+  <text x="715" y="240" text-anchor="middle" class="label-edge" fill="#b45309">OAuth / PKCE + refresh + back-channel</text>
+
+  <!-- Kong -> sample-service (data) -->
+  <line x1="570" y1="430" x2="638" y2="430" class="edge-data" marker-end="url(#arrow-data)"/>
+  <text x="604" y="422" text-anchor="middle" class="label-edge" fill="#1d4ed8">+ X-User-Id / X-Roles</text>
+
+  <!-- nginx -> nginx-exporter -->
+  <line x1="348" y1="378" x2="858" y2="430" class="edge-soft" marker-end="url(#arrow)"/>
+  <text x="612" y="478" text-anchor="middle" class="label-edge">stub_status (internal)</text>
+
+  <!-- Legend -->
+  <g transform="translate(60,560)">
+    <rect class="legend-box" x="0" y="0" width="960" height="100" rx="10"/>
+    <text x="14" y="22" class="label-title">Legend</text>
+
+    <!-- Color swatches -->
+    <rect class="box box-mobile" x="14" y="36" width="20" height="14"/>
+    <text x="42" y="48" class="label-sub">Mobile client</text>
+
+    <rect class="box box-edge" x="142" y="36" width="20" height="14"/>
+    <text x="170" y="48" class="label-sub">Edge / exporter</text>
+
+    <rect class="box box-bff" x="282" y="36" width="20" height="14"/>
+    <text x="310" y="48" class="label-sub">BFF (auth boundary)</text>
+
+    <rect class="box box-kong" x="438" y="36" width="20" height="14"/>
+    <text x="466" y="48" class="label-sub">Kong (data-plane gateway)</text>
+
+    <rect class="box box-svc" x="618" y="36" width="20" height="14"/>
+    <text x="646" y="48" class="label-sub">Upstream service</text>
+
+    <rect class="box box-store" x="752" y="36" width="20" height="14"/>
+    <text x="780" y="48" class="label-sub">Redis (state)</text>
+
+    <rect class="box box-ext" x="852" y="36" width="20" height="14"/>
+    <text x="880" y="48" class="label-sub">External (Keycloak)</text>
+
+    <!-- Edge legend -->
+    <line x1="14" y1="74" x2="54" y2="74" class="edge-auth" marker-end="url(#arrow-auth)"/>
+    <text x="62" y="78" class="label-sub">Auth plane (login, refresh, logout, back-channel)</text>
+
+    <line x1="380" y1="74" x2="420" y2="74" class="edge-data" marker-end="url(#arrow-data)"/>
+    <text x="428" y="78" class="label-sub">Data plane (every business request)</text>
+
+    <line x1="700" y1="74" x2="740" y2="74" class="edge-store" marker-end="url(#arrow)"/>
+    <text x="748" y="78" class="label-sub">State I/O</text>
+
+    <line x1="820" y1="74" x2="860" y2="74" class="edge-soft" marker-end="url(#arrow)"/>
+    <text x="868" y="78" class="label-sub">Internal-only scrape</text>
+  </g>
+</svg>

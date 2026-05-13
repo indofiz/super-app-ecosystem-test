@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 720" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="13">
+  <title>Two-Plane Model — Auth Plane vs Data Plane</title>
+  <desc>The BFF is the auth boundary, used rarely for login/refresh/logout. Kong is the data-plane gateway, hit on every business request. The BFF is OFF the hot path.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-auth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+    <marker id="arrow-store" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6d28d9"/>
+    </marker>
+    <style>
+      .box { fill:#ffffff; stroke:#334155; stroke-width:1.5; rx:10; }
+      .box-edge   { fill:#f1f5f9; stroke:#334155; }
+      .box-bff    { fill:#fef3c7; stroke:#b45309; }
+      .box-kong   { fill:#dbeafe; stroke:#1d4ed8; }
+      .box-svc    { fill:#dcfce7; stroke:#15803d; }
+      .box-ext    { fill:#fde2e7; stroke:#9f1239; stroke-dasharray:6,4; }
+      .box-store  { fill:#ede9fe; stroke:#6d28d9; }
+      .box-mobile { fill:#f0f9ff; stroke:#0369a1; }
+
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .label-edge  { font-size:11px; fill:#1f2937; }
+      .plane-title { font-weight:700; font-size:16px; }
+      .plane-sub   { font-size:12px; }
+
+      .edge-auth  { stroke:#b45309; stroke-width:2.5; fill:none; }
+      .edge-data  { stroke:#1d4ed8; stroke-width:2.5; fill:none; }
+      .edge-store { stroke:#6d28d9; stroke-width:2; fill:none; }
+
+      .plane-auth { fill:#fff7ed; stroke:#b45309; stroke-width:2; rx:14; }
+      .plane-data { fill:#eff6ff; stroke:#1d4ed8; stroke-width:2; rx:14; }
+    </style>
+  </defs>
+
+  <text x="540" y="32" text-anchor="middle" class="label-title" font-size="18">Two-Plane Model</text>
+  <text x="540" y="52" text-anchor="middle" class="label-sub">The BFF is the auth boundary, hit rarely. Kong is the data-plane gateway, hit every request. BFF is OFF the hot path.</text>
+
+  <!-- AUTH PLANE -->
+  <rect class="plane-auth" x="40" y="80" width="1000" height="280"/>
+  <text x="60" y="108" class="plane-title" fill="#b45309">AUTH PLANE — rare</text>
+  <text x="60" y="126" class="plane-sub" fill="#b45309">login • refresh • logout • OIDC back-channel logout</text>
+
+  <!-- Auth plane: mobile -->
+  <rect class="box box-mobile" x="80" y="180" width="120" height="80"/>
+  <text x="140" y="207" text-anchor="middle" class="label-title">Mobile</text>
+  <text x="140" y="225" text-anchor="middle" class="label-sub">Flutter / AppAuth</text>
+  <text x="140" y="241" text-anchor="middle" class="label-sub">+ Dio refresh</text>
+
+  <!-- Auth plane: nginx -->
+  <rect class="box box-edge" x="260" y="180" width="120" height="80"/>
+  <text x="320" y="207" text-anchor="middle" class="label-title">nginx</text>
+  <text x="320" y="225" text-anchor="middle" class="label-sub">/auth/* limit_req</text>
+  <text x="320" y="241" text-anchor="middle" class="label-sub">no $args logged</text>
+
+  <!-- Auth plane: BFF -->
+  <rect class="box box-bff" x="440" y="180" width="160" height="80"/>
+  <text x="520" y="207" text-anchor="middle" class="label-title">BFF</text>
+  <text x="520" y="225" text-anchor="middle" class="label-sub">PKCE + OAuth ceremony</text>
+  <text x="520" y="241" text-anchor="middle" class="label-sub">Mints RS256 internal JWT</text>
+
+  <!-- Auth plane: Keycloak -->
+  <rect class="box box-ext" x="660" y="180" width="160" height="80"/>
+  <text x="740" y="207" text-anchor="middle" class="label-title">Keycloak (SSO)</text>
+  <text x="740" y="225" text-anchor="middle" class="label-sub">EXTERNAL</text>
+  <text x="740" y="241" text-anchor="middle" class="label-sub">issues KC tokens to BFF</text>
+
+  <!-- Auth plane: Redis -->
+  <rect class="box box-store" x="440" y="290" width="160" height="60"/>
+  <text x="520" y="313" text-anchor="middle" class="label-title">Redis</text>
+  <text x="520" y="331" text-anchor="middle" class="label-sub">authstate / bffcode / session</text>
+
+  <!-- Auth plane arrows -->
+  <line x1="200" y1="220" x2="258" y2="220" class="edge-auth" marker-end="url(#arrow-auth)"/>
+  <line x1="380" y1="220" x2="438" y2="220" class="edge-auth" marker-end="url(#arrow-auth)"/>
+  <line x1="600" y1="220" x2="658" y2="220" class="edge-auth" marker-end="url(#arrow-auth)"/>
+  <line x1="520" y1="260" x2="520" y2="288" class="edge-store" marker-end="url(#arrow-store)"/>
+
+  <!-- DATA PLANE -->
+  <rect class="plane-data" x="40" y="380" width="1000" height="280"/>
+  <text x="60" y="408" class="plane-title" fill="#1d4ed8">DATA PLANE — every request</text>
+  <text x="60" y="426" class="plane-sub" fill="#1d4ed8">GET / POST /api/* — Kong validates RS256, injects identity headers, services trust the verdict</text>
+
+  <!-- Data plane: mobile -->
+  <rect class="box box-mobile" x="80" y="480" width="120" height="80"/>
+  <text x="140" y="507" text-anchor="middle" class="label-title">Mobile</text>
+  <text x="140" y="525" text-anchor="middle" class="label-sub">Bearer &lt;internal-jwt&gt;</text>
+  <text x="140" y="541" text-anchor="middle" class="label-sub">+ Dio _AuthInterceptor</text>
+
+  <!-- Data plane: nginx -->
+  <rect class="box box-edge" x="260" y="480" width="120" height="80"/>
+  <text x="320" y="507" text-anchor="middle" class="label-title">nginx</text>
+  <text x="320" y="525" text-anchor="middle" class="label-sub">/api/* limit_req</text>
+  <text x="320" y="541" text-anchor="middle" class="label-sub">X-Request-Id mint</text>
+
+  <!-- Data plane: Kong -->
+  <rect class="box box-kong" x="440" y="480" width="200" height="80"/>
+  <text x="540" y="507" text-anchor="middle" class="label-title">Kong (DB-less)</text>
+  <text x="540" y="525" text-anchor="middle" class="label-sub">RS256 verify (kid lookup)</text>
+  <text x="540" y="541" text-anchor="middle" class="label-sub">iss/aud + identity inject</text>
+
+  <!-- Data plane: service -->
+  <rect class="box box-svc" x="700" y="480" width="160" height="80"/>
+  <text x="780" y="507" text-anchor="middle" class="label-title">sample-service</text>
+  <text x="780" y="525" text-anchor="middle" class="label-sub">reads X-User-Id / X-Roles</text>
+  <text x="780" y="541" text-anchor="middle" class="label-sub">no auth code</text>
+
+  <!-- BFF off the hot path note -->
+  <rect class="box box-bff" x="900" y="490" width="120" height="60" opacity="0.5"/>
+  <text x="960" y="513" text-anchor="middle" class="label-title">BFF</text>
+  <text x="960" y="531" text-anchor="middle" class="label-sub">NOT INVOLVED</text>
+
+  <!-- Data plane arrows -->
+  <line x1="200" y1="520" x2="258" y2="520" class="edge-data" marker-end="url(#arrow-data)"/>
+  <line x1="380" y1="520" x2="438" y2="520" class="edge-data" marker-end="url(#arrow-data)"/>
+  <line x1="640" y1="520" x2="698" y2="520" class="edge-data" marker-end="url(#arrow-data)"/>
+
+  <text x="170" y="510" text-anchor="middle" class="label-sub" fill="#1d4ed8">Bearer</text>
+  <text x="350" y="510" text-anchor="middle" class="label-sub" fill="#1d4ed8">+ Bearer</text>
+  <text x="669" y="510" text-anchor="middle" class="label-sub" fill="#1d4ed8">no Bearer</text>
+  <text x="669" y="568" text-anchor="middle" class="label-sub" fill="#1d4ed8">X-User-Id / X-Roles</text>
+
+  <!-- Legend strip -->
+  <g transform="translate(60,680)">
+    <line x1="0" y1="0" x2="40" y2="0" class="edge-auth" marker-end="url(#arrow-auth)"/>
+    <text x="48" y="4" class="label-sub">Auth plane</text>
+    <line x1="160" y1="0" x2="200" y2="0" class="edge-data" marker-end="url(#arrow-data)"/>
+    <text x="208" y="4" class="label-sub">Data plane</text>
+    <line x1="320" y1="0" x2="360" y2="0" class="edge-store" marker-end="url(#arrow-store)"/>
+    <text x="368" y="4" class="label-sub">State I/O (Redis)</text>
+  </g>
+</svg>

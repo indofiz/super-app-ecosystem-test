@@ -229,6 +229,12 @@ client all share one id per request.
 
 ## Adding more services
 
+> **Full guide:** [`docs/adding-a-service.md`](../docs/adding-a-service.md)
+> walks through both authenticated and public service paths with validation,
+> smoke tests, and the common-mistakes table. The quick reference below is
+> the minimum yaml — read the guide for the rationale, the public-service
+> variant, and the per-route role check pattern.
+
 Append to `kong.yml`:
 
 ```yaml

@@ -5,13 +5,11 @@ class AuthSession extends Equatable {
     required this.accessToken,
     required this.sessionId,
     required this.expiresAt,
-    this.idToken,
   });
 
   final String accessToken;
   final String sessionId;
   final DateTime expiresAt;
-  final String? idToken;
 
   bool get isExpired => DateTime.now().isAfter(expiresAt);
 
@@ -19,16 +17,14 @@ class AuthSession extends Equatable {
     String? accessToken,
     String? sessionId,
     DateTime? expiresAt,
-    String? idToken,
   }) {
     return AuthSession(
       accessToken: accessToken ?? this.accessToken,
       sessionId: sessionId ?? this.sessionId,
       expiresAt: expiresAt ?? this.expiresAt,
-      idToken: idToken ?? this.idToken,
     );
   }
 
   @override
-  List<Object?> get props => [accessToken, sessionId, expiresAt, idToken];
+  List<Object?> get props => [accessToken, sessionId, expiresAt];
 }

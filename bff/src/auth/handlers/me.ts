@@ -23,6 +23,10 @@ export const makeMeHandler = (deps: {
         throw unauthorized('invalid_session', 'Session not found or expired');
       }
 
+      // AUDIT §5.1: slide TTL so active /me callers keep their session
+      // alive without /refresh.
+      await deps.sessionStore.touch(claims.sid);
+
       res.setHeader('Cache-Control', 'no-store');
       res.json({
         sub: claims.sub,

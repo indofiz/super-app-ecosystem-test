@@ -10,7 +10,7 @@ admin, etc.) never see Keycloak directly and never hold a refresh token.
 |---|---|---|
 | `GET`  | `/auth/authorize`          | OAuth-shaped entry. Validates app PKCE, redirects user to Keycloak with the BFF's own PKCE pair. |
 | `GET`  | `/auth/callback`           | Internal — Keycloak redirects here. BFF exchanges Keycloak `code` for tokens, mints a one-time `bff_authcode`, redirects user back to the app's deeplink. |
-| `POST` | `/auth/token`              | App POSTs `code + code_verifier` → `{access_token, expires_in, id_token, session_id}`. PKCE verified here. |
+| `POST` | `/auth/token`              | App POSTs `code + code_verifier` → `{access_token, token_type, expires_in, scope, session_id}`. PKCE verified here. The internal JWT *is* `access_token`; Keycloak's `id_token` never leaves the BFF. |
 | `POST` | `/auth/refresh`            | Header `Authorization: Bearer <jwt>` + body `{session_id}` → fresh `access_token`. Bearer's `sid` claim must match `session_id`. Accepts bearers expired ≤24h. |
 | `POST` | `/auth/logout`             | Header `Authorization: Bearer <jwt>` + body `{session_id}` → invalidates Redis + Keycloak session. Same bearer/`sid` binding as `/refresh`. |
 | `GET`  | `/auth/me`                 | Header `Authorization: Bearer <jwt>` (strict, no grace window) → `{sub, username, email, roles, expiresAt}`. Reads the profile snapshot saved at login/refresh; bounded staleness ≤ refresh cycle. |
@@ -45,7 +45,7 @@ The refresh token never leaves the BFF. The app holds only `access_token` +
   │ ─────────────────►                                  │
   │                  │ verify APPCV ↔ APPCH (PKCE)
   │                  │ generate session_id, store {refresh_token, sub} in Redis
-  │ ◄── {access_token, expires_in, id_token, session_id}│
+  │ ◄── {access_token, expires_in, session_id} ─────────│
 ```
 
 ## Run locally

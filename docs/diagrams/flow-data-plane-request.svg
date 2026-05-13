@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 920" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="12">
+  <title>Data-Plane Request — mobile → nginx → Kong → service</title>
+  <desc>Every business request. Kong validates the BFF-minted RS256 JWT, strips any caller-supplied identity headers, decodes the verified claims, enforces iss/aud, re-sets X-User-Id / X-Session-Id / X-Roles from trusted claims, drops the Authorization header, and rate-limits per user. The upstream service never sees the bearer.</desc>
+
+  <defs>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .box { fill:#ffffff; stroke:#334155; stroke-width:1.5; rx:10; }
+      .box-edge   { fill:#f1f5f9; stroke:#334155; }
+      .box-kong   { fill:#dbeafe; stroke:#1d4ed8; }
+      .box-svc    { fill:#dcfce7; stroke:#15803d; }
+      .box-mobile { fill:#f0f9ff; stroke:#0369a1; }
+
+      .label-title { font-weight:700; font-size:14px; fill:#0f172a; }
+      .label-sub   { font-size:11px; fill:#475569; }
+      .lifeline    { stroke:#94a3b8; stroke-width:1; stroke-dasharray:3,4; }
+
+      .msg-data   { stroke:#1d4ed8; stroke-width:1.8; fill:none; }
+      .msg-soft   { stroke:#475569; stroke-width:1.5; fill:none; stroke-dasharray:5,4; }
+      .msg-label  { font-size:11px; fill:#1f2937; }
+
+      .phase      { fill:#eff6ff; stroke:#1d4ed8; stroke-width:1.5; rx:8; }
+      .phase-title { font-weight:700; font-size:12px; fill:#1d4ed8; }
+      .phase-text  { font-size:11px; fill:#1e293b; }
+
+      .note       { fill:#fef9c3; stroke:#a16207; stroke-width:1; rx:6; }
+      .note-text  { font-size:11px; fill:#713f12; }
+      .step-bg    { fill:#0f172a; }
+      .step-num   { fill:#ffffff; font-weight:700; font-size:10px; }
+    </style>
+  </defs>
+
+  <text x="540" y="28" text-anchor="middle" class="label-title" font-size="18">Data-Plane Request — every business call (the 99% case)</text>
+  <text x="540" y="48" text-anchor="middle" class="label-sub">BFF is NOT in this path. Kong verifies the RS256 internal JWT with the public PEM, injects trusted identity headers, strips the bearer.</text>
+
+  <!-- Actor boxes -->
+  <rect class="box box-mobile" x="60"  y="80" width="160" height="56"/>
+  <text x="140" y="105" text-anchor="middle" class="label-title">Mobile (Dio)</text>
+  <text x="140" y="123" text-anchor="middle" class="label-sub">_AuthInterceptor adds Bearer</text>
+
+  <rect class="box box-edge" x="300" y="80" width="180" height="56"/>
+  <text x="390" y="105" text-anchor="middle" class="label-title">nginx</text>
+  <text x="390" y="123" text-anchor="middle" class="label-sub">edge / rate-limit / X-Request-Id</text>
+
+  <rect class="box box-kong" x="560" y="80" width="220" height="56"/>
+  <text x="670" y="105" text-anchor="middle" class="label-title">Kong (DB-less)</text>
+  <text x="670" y="123" text-anchor="middle" class="label-sub">jwt + pre-function + rate-limit</text>
+
+  <rect class="box box-svc" x="860" y="80" width="160" height="56"/>
+  <text x="940" y="105" text-anchor="middle" class="label-title">sample-service</text>
+  <text x="940" y="123" text-anchor="middle" class="label-sub">no auth code</text>
+
+  <!-- Lifelines -->
+  <line x1="140" y1="140" x2="140" y2="860" class="lifeline"/>
+  <line x1="390" y1="140" x2="390" y2="860" class="lifeline"/>
+  <line x1="670" y1="140" x2="670" y2="860" class="lifeline"/>
+  <line x1="940" y1="140" x2="940" y2="860" class="lifeline"/>
+
+  <!-- Step 1: Mobile -> nginx -->
+  <line x1="140" y1="180" x2="388" y2="180" class="msg-data" marker-end="url(#arrow-data)"/>
+  <circle cx="156" cy="174" r="9" class="step-bg"/><text x="156" y="178" text-anchor="middle" class="step-num">1</text>
+  <text x="264" y="174" text-anchor="middle" class="msg-label" fill="#1d4ed8">GET /api/profile   Authorization: Bearer &lt;internal-jwt&gt;</text>
+
+  <!-- Note: nginx X-Request-Id overwrite -->
+  <rect class="note" x="300" y="200" width="180" height="36"/>
+  <text x="390" y="218" text-anchor="middle" class="note-text">mint $request_id; OVERWRITE</text>
+  <text x="390" y="231" text-anchor="middle" class="note-text">caller X-Request-Id; limit_req</text>
+
+  <!-- Step 2: nginx -> Kong -->
+  <line x1="390" y1="260" x2="668" y2="260" class="msg-data" marker-end="url(#arrow-data)"/>
+  <circle cx="406" cy="254" r="9" class="step-bg"/><text x="406" y="258" text-anchor="middle" class="step-num">2</text>
+  <text x="529" y="254" text-anchor="middle" class="msg-label" fill="#1d4ed8">forward + X-Request-Id (trusted), keepalive</text>
+
+  <!-- Kong processing stack (big annotated box on Kong's lane) -->
+  <g>
+    <!-- Outer block -->
+    <rect class="phase" x="540" y="290" width="260" height="280" opacity="0.6"/>
+    <text x="670" y="308" text-anchor="middle" class="phase-title">Kong processing (access phase)</text>
+
+    <!-- Phase A: jwt plugin -->
+    <rect class="phase" x="552" y="320" width="236" height="74"/>
+    <text x="670" y="338" text-anchor="middle" class="phase-title">A. bundled jwt plugin (prio 1450)</text>
+    <text x="670" y="354" text-anchor="middle" class="phase-text">read Authorization only (no cookie/uri)</text>
+    <text x="670" y="368" text-anchor="middle" class="phase-text">kid → rsa_public_key lookup</text>
+    <text x="670" y="382" text-anchor="middle" class="phase-text">RS256 verify, exp + nbf, max_exp=600s</text>
+
+    <!-- Phase B: pre-function -->
+    <rect class="phase" x="552" y="402" width="236" height="100"/>
+    <text x="670" y="420" text-anchor="middle" class="phase-title">B. pre-function (prio 1000)</text>
+    <text x="670" y="436" text-anchor="middle" class="phase-text">strip caller X-User-Id / X-Roles / X-Session-Id</text>
+    <text x="670" y="450" text-anchor="middle" class="phase-text">decode JWT payload (base64url + cjson.safe)</text>
+    <text x="670" y="464" text-anchor="middle" class="phase-text">enforce iss=super-app-bff, aud=super-app-services</text>
+    <text x="670" y="478" text-anchor="middle" class="phase-text">SET X-User-Id=sub, X-Session-Id=sid, X-Roles=join(roles)</text>
+    <text x="670" y="492" text-anchor="middle" class="phase-text">CLEAR Authorization (no raw bearer upstream)</text>
+
+    <!-- Phase C: rate-limit -->
+    <rect class="phase" x="552" y="510" width="236" height="48"/>
+    <text x="670" y="528" text-anchor="middle" class="phase-title">C. rate-limiting (prio 910)</text>
+    <text x="670" y="544" text-anchor="middle" class="phase-text">limit_by header X-User-Id, 600/min, fail-open</text>
+  </g>
+
+  <!-- Step 3: Kong -> service -->
+  <line x1="670" y1="590" x2="938" y2="590" class="msg-data" marker-end="url(#arrow-data)"/>
+  <circle cx="686" cy="584" r="9" class="step-bg"/><text x="686" y="588" text-anchor="middle" class="step-num">3</text>
+  <text x="804" y="584" text-anchor="middle" class="msg-label" fill="#1d4ed8">GET /  + X-User-Id, X-Session-Id, X-Roles, X-Request-Id</text>
+  <text x="804" y="602" text-anchor="middle" class="msg-label" fill="#9f1239">(no Authorization header)</text>
+
+  <!-- Note: service identity from headers only -->
+  <rect class="note" x="860" y="620" width="160" height="36"/>
+  <text x="940" y="638" text-anchor="middle" class="note-text">identityFromHeaders(req)</text>
+  <text x="940" y="651" text-anchor="middle" class="note-text">never decodes the JWT</text>
+
+  <!-- Step 4: service -> Kong 200 -->
+  <line x1="938" y1="680" x2="672" y2="680" class="msg-data" marker-end="url(#arrow-data)"/>
+  <circle cx="924" cy="674" r="9" class="step-bg"/><text x="924" y="678" text-anchor="middle" class="step-num">4</text>
+  <text x="805" y="674" text-anchor="middle" class="msg-label" fill="#1d4ed8">200  { service, requestId, identity, ts }</text>
+
+  <!-- Step 5: Kong -> nginx -->
+  <line x1="668" y1="720" x2="392" y2="720" class="msg-data" marker-end="url(#arrow-data)"/>
+  <circle cx="654" cy="714" r="9" class="step-bg"/><text x="654" y="718" text-anchor="middle" class="step-num">5</text>
+  <text x="530" y="714" text-anchor="middle" class="msg-label" fill="#1d4ed8">200  + echoed X-Request-Id</text>
+
+  <!-- Step 6: nginx -> Mobile -->
+  <line x1="388" y1="760" x2="142" y2="760" class="msg-data" marker-end="url(#arrow-data)"/>
+  <circle cx="374" cy="754" r="9" class="step-bg"/><text x="374" y="758" text-anchor="middle" class="step-num">6</text>
+  <text x="265" y="754" text-anchor="middle" class="msg-label" fill="#1d4ed8">200  body forwarded; X-Request-Id echoed to client</text>
+
+  <!-- Failure-branch footer -->
+  <g transform="translate(60,800)">
+    <rect class="box" x="0" y="0" width="960" height="90" rx="10" fill="#f8fafc"/>
+    <text x="14" y="20" class="label-title">Failure branches (all early-exit before the service is touched)</text>
+    <text x="14" y="40" class="label-sub">• Phase A — missing/invalid Bearer, exp past, nbf future, exp-iat &gt; 600s, or unknown kid → Kong 401.</text>
+    <text x="14" y="58" class="label-sub">• Phase B — wrong iss or aud → Kong 401 ("invalid issuer" / "invalid audience"). Wrong kid still 401s at A, never reaches B.</text>
+    <text x="14" y="76" class="label-sub">• Phase C — &gt;600/min by X-User-Id → Kong 429. Mobile surfaces to user; retry after Retry-After.</text>
+  </g>
+</svg>

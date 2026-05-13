@@ -163,6 +163,36 @@ describe('InternalJwtIssuer (RS256)', () => {
     expect(claims.sub).toBe('user-123');
   });
 
+  it('verifyAllowingExpired rejects tokens whose grace window has passed (AUDIT S-6)', async () => {
+    // Token expired 1h ago. With grace=60 it's outside the window and
+    // should be rejected. (The base 60s clockTolerance is the "live"
+    // window; grace must extend past that to be meaningful.)
+    const issuer = await buildIssuer(v1, [], -3600);
+    const { token } = await issuer.mint(sampleClaims);
+    await expect(issuer.verifyAllowingExpired(token, 60)).rejects.toThrow();
+    // With a generous grace it goes through.
+    const claims = await issuer.verifyAllowingExpired(token, 60 * 60 * 24);
+    expect(claims.sub).toBe('user-123');
+  });
+
+  it('verifyAllowingExpired rejects tokens with a future nbf (AUDIT S-6)', async () => {
+    // The narrowed clockTolerance (60s) means a token whose nbf is 1h in
+    // the future is no longer accepted just because the legacy 24h
+    // window allowed it.
+    const issuer = await buildIssuer(v1);
+    const futureNbf = new SignJWT({ sid: 's', roles: [] })
+      .setProtectedHeader({ alg: 'RS256', typ: 'JWT', kid: 'v1' })
+      .setIssuer(ISSUER)
+      .setAudience(AUDIENCE)
+      .setSubject('user-123')
+      .setIssuedAt()
+      .setNotBefore(`${60 * 60}s`)
+      .setExpirationTime(`${60 * 60 * 2}s`);
+    const privateKey = await importPKCS8(v1.privatePem, 'RS256');
+    const token = await futureNbf.sign(privateKey);
+    await expect(issuer.verifyAllowingExpired(token)).rejects.toThrow();
+  });
+
   it('rejects tokens with wrong issuer or audience', async () => {
     const issuer = await buildIssuer(v1);
     const { token } = await issuer.mint(sampleClaims);

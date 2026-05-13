@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../../core/config/app_config.dart';
 import '../../auth/domain/auth_repository.dart';
 import '../../auth/presentation/bloc/auth_bloc.dart';
 import '../../sample/data/sample_api.dart';
@@ -50,10 +49,8 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
   Future<void> _fetchApiProfile() => _run(() async {
-        final session = context.read<AuthBloc>().state.session;
-        if (session == null) throw Exception('No session');
-        final api = SampleApi(config: context.read<AppConfig>());
-        final body = await api.getProfile(session.accessToken);
+        final api = context.read<SampleApi>();
+        final body = await api.getProfile();
         setState(() {
           _apiResult = const JsonEncoder.withIndent('  ').convert(body);
         });

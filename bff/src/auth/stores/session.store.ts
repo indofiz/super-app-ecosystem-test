@@ -1,44 +1,27 @@
 import type { Redis } from 'ioredis';
+import { z } from 'zod';
+import { RedisJsonStore } from './redisJson.store.js';
 
-export interface SessionProfile {
-  username?: string;
-  email?: string;
-  roles: string[];
-}
+export const SessionProfileZ = z.object({
+  username: z.string().optional(),
+  email: z.string().optional(),
+  roles: z.array(z.string()),
+});
 
-export interface SessionRecord {
-  refreshToken: string;
-  sub: string;
-  appClientId: string;
-  createdAt: string;
-  lastUsedAt: string;
-  /** Snapshot of user profile from the most recent KC token, used by /auth/me. */
-  profile?: SessionProfile;
-}
+export const SessionRecordZ = z.object({
+  refreshToken: z.string().min(1),
+  sub: z.string().min(1),
+  appClientId: z.string().min(1),
+  createdAt: z.string().min(1),
+  lastUsedAt: z.string().min(1),
+  profile: SessionProfileZ.optional(),
+});
 
-const key = (sid: string) => `session:${sid}`;
+export type SessionProfile = z.infer<typeof SessionProfileZ>;
+export type SessionRecord = z.infer<typeof SessionRecordZ>;
 
-export class SessionStore {
-  constructor(
-    private readonly redis: Redis,
-    private readonly ttlSeconds: number,
-  ) {}
-
-  async put(sessionId: string, record: SessionRecord): Promise<void> {
-    await this.redis.set(key(sessionId), JSON.stringify(record), 'EX', this.ttlSeconds);
-  }
-
-  async get(sessionId: string): Promise<SessionRecord | null> {
-    const raw = await this.redis.get(key(sessionId));
-    return raw ? (JSON.parse(raw) as SessionRecord) : null;
-  }
-
-  async update(sessionId: string, record: SessionRecord): Promise<void> {
-    // Re-set with full TTL window (sliding session).
-    await this.put(sessionId, record);
-  }
-
-  async delete(sessionId: string): Promise<void> {
-    await this.redis.del(key(sessionId));
+export class SessionStore extends RedisJsonStore<SessionRecord> {
+  constructor(redis: Redis, ttlSeconds: number) {
+    super(redis, 'session', ttlSeconds, SessionRecordZ);
   }
 }

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   SignJWT,
   decodeProtectedHeader,
+  errors as joseErrors,
   exportJWK,
   importPKCS8,
   importSPKI,
@@ -129,12 +130,36 @@ export class InternalJwtIssuer {
    * Verifies signature + iss + aud but tolerates an expired `exp` up to
    * `graceSeconds` past expiry. Used by `/auth/logout` and the recently-expired
    * branch of `/auth/refresh` (see IMPROVEMENT_PLAN §2.1).
+   *
+   * AUDIT S-6: jose's `clockTolerance` widens *all* clock claims (exp,
+   * nbf, iat). The legacy 24h tolerance therefore made a future-dated
+   * `nbf` token acceptable for a day, which is wider than the intent.
+   * We now use a tight 60s tolerance for skew on signature path, and
+   * handle the expired-within-grace case explicitly via JWTExpired.
    */
   async verifyAllowingExpired(
     token: string,
     graceSeconds = 24 * 60 * 60,
   ): Promise<InternalJwtVerifiedClaims> {
-    return this.verifyInternal(token, { clockTolerance: graceSeconds });
+    try {
+      return await this.verifyInternal(token, { clockTolerance: 60 });
+    } catch (err) {
+      if (err instanceof joseErrors.JWTExpired) {
+        const payload = err.payload;
+        const exp = typeof payload.exp === 'number' ? payload.exp : 0;
+        const nowSec = Math.floor(Date.now() / 1000);
+        if (exp > 0 && nowSec <= exp + graceSeconds) {
+          // Token is expired but within the grace window. We've already
+          // confirmed signature + iss + aud + nbf via jwtVerify (the
+          // exception fires *after* those pass), so we trust the payload
+          // and stamp the kid from the header.
+          const header = decodeProtectedHeader(token);
+          const kid = typeof header.kid === 'string' ? header.kid : '';
+          return { ...(payload as unknown as InternalJwtVerifiedClaims), kid };
+        }
+      }
+      throw err;
+    }
   }
 
   /** Public keys in JWKS shape — for `/.well-known/jwks.json`. */

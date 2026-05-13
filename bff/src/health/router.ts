@@ -55,7 +55,7 @@ export const buildHealthRouter = ({ redis, keycloak, env }: HealthDeps): Router 
 
     try {
       const reply = await withTimeout(redis.ping(), 1000, 'redis.ping');
-      if (reply !== 'PONG') throw new Error(`unexpected redis reply: ${reply}`);
+      if (reply !== 'PONG') throw new Error(`unexpected redis reply: ${String(reply)}`);
       checks.redis = 'ok';
     } catch (err) {
       checks.redis = err instanceof Error ? `fail: ${err.message}` : 'fail';

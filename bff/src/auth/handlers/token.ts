@@ -1,17 +1,19 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import type { Env } from '../../config/env.js';
-import { badRequest, unauthorized } from '../../lib/errors.js';
+import { badRequestFromZod, unauthorized } from '../../lib/errors.js';
 import { randomUrlSafe } from '../../lib/ids.js';
 import type { InternalJwtIssuer } from '../../lib/internalJwt.js';
 import {
   KeycloakJwtVerificationError,
+  verifyAndExtractProfile,
   type KeycloakJwtVerifier,
 } from '../../lib/keycloakJwt.js';
 import type { MetricsBundle } from '../../lib/metrics.js';
 import { verifyChallenge } from '../../lib/pkce.js';
 import type { BffCodeStore } from '../stores/bffCode.store.js';
-import type { SessionProfile, SessionStore } from '../stores/session.store.js';
+import type { SessionStore } from '../stores/session.store.js';
+import type { UserSessionsStore } from '../stores/userSessions.store.js';
 
 const BodySchema = z.object({
   grant_type: z.literal('authorization_code'),
@@ -21,44 +23,11 @@ const BodySchema = z.object({
   redirect_uri: z.string().min(1),
 });
 
-/**
- * Verify upstream tokens and project them into the BFF's `SessionProfile`.
- *
- * Used by /auth/callback (fresh from KC), /auth/refresh (fresh from KC),
- * and /auth/token (loaded from `bffcode:*` Redis records).
- *
- * The verifier guarantees:
- *   - signature against KC's JWKS
- *   - issuer = KC_ISSUER
- *   - id_token aud = KC_CLIENT_ID
- *   - exp not past (with clockTolerance)
- *
- * If verification fails the error propagates as a `KeycloakJwtVerificationError`
- * which callers translate to the right HTTP status (400/401 vs 502).
- */
-export const verifyAndExtractProfile = async (
-  verifier: KeycloakJwtVerifier,
-  accessToken: string | undefined,
-  idToken: string | undefined,
-  fallbackSub: string,
-): Promise<{ sub: string; profile: SessionProfile }> => {
-  const idClaims = idToken ? await verifier.verifyIdToken(idToken) : null;
-  const acClaims = accessToken ? await verifier.verifyAccessToken(accessToken) : null;
-  const sub = idClaims?.sub ?? acClaims?.sub ?? fallbackSub;
-  return {
-    sub,
-    profile: {
-      username: idClaims?.preferred_username,
-      email: idClaims?.email,
-      roles: acClaims?.realm_access?.roles ?? [],
-    },
-  };
-};
-
 export const makeTokenHandler = (deps: {
   env: Env;
   bffCodeStore: BffCodeStore;
   sessionStore: SessionStore;
+  userSessionsStore: UserSessionsStore;
   internalJwtIssuer: InternalJwtIssuer;
   keycloakJwtVerifier: KeycloakJwtVerifier;
   metrics?: MetricsBundle;
@@ -67,7 +36,7 @@ export const makeTokenHandler = (deps: {
     try {
       const parsed = BodySchema.safeParse(req.body);
       if (!parsed.success) {
-        throw badRequest('invalid_request', parsed.error.issues[0]?.message ?? 'Invalid body');
+        throw badRequestFromZod(parsed.error, 'Invalid body');
       }
       const b = parsed.data;
 
@@ -121,6 +90,9 @@ export const makeTokenHandler = (deps: {
         lastUsedAt: now,
         profile: extracted.profile,
       });
+      // AUDIT S-5: index this session under its sub so back-channel logout
+      // can find it without SCANning the keyspace.
+      await deps.userSessionsStore.add(extracted.sub, sessionId);
 
       // Mint the internal JWT mobile will carry. Keycloak's access_token never
       // leaves this handler.
