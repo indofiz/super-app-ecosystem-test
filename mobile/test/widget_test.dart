@@ -9,6 +9,8 @@ void main() {
         accessToken: 'a',
         sessionId: 's',
         expiresAt: DateTime.now().subtract(const Duration(seconds: 1)),
+        emailVerified: false,
+        phoneNumberVerified: false,
       );
       expect(session.isExpired, isTrue);
     });
@@ -18,6 +20,8 @@ void main() {
         accessToken: 'a',
         sessionId: 's',
         expiresAt: DateTime.now().add(const Duration(minutes: 5)),
+        emailVerified: false,
+        phoneNumberVerified: false,
       );
       expect(session.isExpired, isFalse);
     });
@@ -27,6 +31,8 @@ void main() {
         accessToken: 'a',
         sessionId: 's',
         expiresAt: DateTime.utc(2030),
+        emailVerified: false,
+        phoneNumberVerified: false,
       );
       final updated = original.copyWith(accessToken: 'b');
       expect(updated.accessToken, 'b');

@@ -10,12 +10,37 @@ loop. This doc covers everything *before* the first successful login:
 account creation, email verification (OTP code), NIK collection, phone
 capture, WhatsApp OTP verification, and password reset.
 
-> **TL;DR.** Every credential or identity-affecting operation runs on the
-> Keycloak hosted page opened via the same `flutter_appauth` Custom Tab the
-> login flow already uses. The only exception is **WhatsApp OTP**, which
-> Keycloak doesn't ship out of the box; for the MVP it lives in the BFF as
-> a post-login required step, and migrates into a Keycloak Required Action
-> SPI in v2.
+> **TL;DR.** Credential ceremonies (password set, password reset)
+> run on the Keycloak hosted page opened via `flutter_appauth`.
+> Registration also runs on the hosted page (the "Daftar" link).
+> **Email verification** and **WhatsApp verification** are both
+> attribute-verification (not credential) ceremonies and run in-app
+> through the BFF — see §4.B and §4.D and the "Implementation status"
+> box below.
+
+> **Implementation status (as of 2026-05-14).** Phase 0.2, Phase 1, and
+> Phase 2 of §5 have shipped:
+>   - Mobile soft-gate: home shows a banner when `email_verified` or
+>     `phone_number_verified` is false. Tap → verify screen.
+>   - BFF endpoints `POST /auth/{email,phone}/{send,verify}-otp`,
+>     OTP store with hashed codes + per-record attempts cap, Gmail
+>     SMTP adapter (nodemailer, App Password), Fonnte WA adapter,
+>     Keycloak Admin client with GET-then-PUT attribute merge.
+>   - Internal JWT now carries `email_verified`, `phone_number`,
+>     `phone_number_verified`; `/auth/me` returns them too.
+>
+> **Deviation from §4.B.** We shipped email as in-app OTP (the §4.B B2
+> shape, but in the BFF instead of a KC Required Action SPI) rather
+> than B1 (KC hosted magic link). Reasons:
+>   - Same UX shape as WA OTP — one verify screen, two inputs.
+>   - No Gmail-as-Keycloak-SMTP wiring required; the BFF's nodemailer
+>     adapter owns the channel.
+>   - Email is an *attribute* (no password in mobile), so the §3
+>     "credentials must run on the IdP origin" argument doesn't apply
+>     with the same force.
+> When a second client (web/OPD portal) arrives that argument *does*
+> apply again — migrating both ceremonies to KC Required Action SPIs
+> (§4.B B2 + §4.D D1) becomes the right move at that point.
 
 ---
 
@@ -91,7 +116,7 @@ Already declared on the user model:
 
 Clients:
 
-- `mobile-bff` (confidential, `serviceAccountsEnabled: true` — the BFF can call the Admin API).
+- `super-app-bff` (confidential, `serviceAccountsEnabled: true` — the BFF can call the Admin API).
 - `launcher-web` (public, standard flow).
 
 ### 2.2 Gaps that must be closed before shipping registration
@@ -101,8 +126,7 @@ Clients:
 | `smtpServer: {}` | **Verify Email** and **Forgot Password** both depend on outbound email; without SMTP they are no-ops. | Configure Realm → Email with a reliable transactional provider (e.g. Gov-tenant SES, a regional MTA). |
 | `bruteForceProtected: false` | A registration/reset endpoint without lockout is an enumeration + credential-stuffing surface. | Turn on, set `failureFactor=10`, `waitIncrementSeconds=60`, `maxFailureWaitSeconds=900`. |
 | `verifyEmail: false` (global flag) | Even though `VERIFY_EMAIL` is enabled as a required action, the realm-level flag is what forces it on new registrations. | Set to `true` once SMTP works. |
-| `mobile-bff` client **secret is committed** in the realm export (plaintext) | Anyone with repo read access has the secret. | Rotate the secret in KC admin; remove the value from the committed JSON or re-export with `--users skip --realm-only`. |
-| Client id mismatch: BFF `.env.example` uses `KC_CLIENT_ID=super-app-bff`, realm has `mobile-bff` | The current code path would 400 on `invalid_client`. | Pick one. Recommend `mobile-bff` (already in the realm) and update `bff/.env.example`. |
+| `super-app-bff` client **secret is committed** in the realm export (plaintext) | Anyone with repo read access has the secret. | Rotate the secret in KC admin; remove the value from the committed JSON or re-export with `--users skip --realm-only`. |
 | No declarative User Profile policy | `nik` exists as a free-form attribute with no validators; KC won't render a registration form field for it without User Profile enabled. | Realm Settings → User Profile → Enable, then declare `nik`, `phoneNumber`, `phoneNumberVerified` (see [Appendix A](#appendix-a-declarative-user-profile-snippet)). |
 | No `MASYARAKAT_VERIFIED` role (or equivalent gate) | The downstream services have no way to require "phone verified" beyond reading the `phone_number_verified` claim. | Either add the role, or have services check `phone_number_verified === "true"` from the internal JWT. Recommend the claim approach. |
 
@@ -450,16 +474,25 @@ seen as future-proof.
 
 ### Phase 0 — realm hygiene (half a day, blocks everything else)
 
-1. Rotate `mobile-bff` client secret in KC admin; remove the value from
-   the committed realm export (re-export or hand-edit).
-2. Decide on `mobile-bff` as the BFF client id; update `bff/.env.example`
-   and the running `bff/.env` (`KC_CLIENT_ID=mobile-bff`).
-3. Configure `smtpServer` (Realm Settings → Email). Pilot with a low-volume
-   provider; switch to gov-tenant SES once available.
-4. Set `bruteForceProtected=true`, `verifyEmail=true`.
-5. Enable Realm Settings → User Profile → declarative profile JSON
-   from [Appendix A](#appendix-a-declarative-user-profile-snippet).
-6. Run `node kong/scripts/audit-kid-config.mjs` to confirm no other
+See [`realm-setup.md`](./realm-setup.md) for the click-by-click admin
+walkthrough. Summary:
+
+1. Rotate `super-app-bff` client secret in KC admin; remove the value from
+   the committed realm export (re-export or hand-edit). Put the new secret
+   in `bff/.env` as `KC_CLIENT_SECRET`.
+2. **Add `phone` to `super-app-bff`'s default client scopes** — required
+   so `phone_number_verified` lands on access tokens.
+3. **Grant `manage-users` + `view-users` (from `realm-management`) to the
+   `super-app-bff` service account** — required so the BFF can call
+   `PUT /admin/realms/.../users/{id}` to flip verification flags.
+4. **Enable User Profile** + paste the JSON from
+   [Appendix A](#appendix-a-declarative-user-profile-snippet) — declares
+   `nik`, `phoneNumber`, and `phoneNumberVerified` (admin-edit-only).
+5. (Recommended) Configure `smtpServer` (Realm Settings → Email) for
+   future Forgot-Password / hosted email-verify flows. The BFF's own OTP
+   email goes via the BFF's nodemailer adapter, not KC SMTP.
+6. (Recommended) Set `bruteForceProtected=true`.
+7. Run `node kong/scripts/audit-kid-config.mjs` to confirm no other
    config drift snuck in.
 
 ### Phase 1 — registration on the hosted page (1 day)
@@ -491,15 +524,15 @@ seen as future-proof.
 3. New Redis store `bff/src/auth/stores/otp.store.ts` with
    `put / takeAndCompare / delete` and an attempts counter.
 4. KC Admin API client in `bff/src/lib/keycloakAdmin.ts` using the
-   `mobile-bff` service account (client credentials grant — already
+   `super-app-bff` service account (client credentials grant — already
    enabled). One method needed:
    `setUserAttributes(sub, { phoneNumber, phoneNumberVerified })`.
 5. Add `phone_number_verified` claim to the internal JWT mint path in
    `bff/src/auth/handlers/token.ts` and `refresh.ts`. Source it from the
    `phone_number_verified` claim on the KC access token (already
-   available via the OIDC `phone` scope, which `mobile-bff` must request
-   — confirm `KC_SCOPES` includes `phone` and update the realm scope
-   if needed).
+   available via the OIDC `phone` scope, which `super-app-bff` must
+   request — confirm `KC_SCOPES` includes `phone` and update the realm
+   scope if needed).
 6. Mobile: new Bloc state `phoneVerificationRequired` triggered after
    login when the JWT lacks `phone_number_verified=true`; screen at
    `mobile/lib/features/auth/presentation/screens/phone_verify_screen.dart`
@@ -682,7 +715,7 @@ profile snapshot returned by `/auth/me` (the BFF already returns
 | OTP brute force | 5 attempts per OTP record; `GETDEL` on exhaustion; send rate-limited. |
 | SIM swap / WA hijack | Inherent to phone-based OTP. Mitigated by short window (300 s), low send rate, and *not* using phone as the only authenticator — it's an attribute verification, not a login factor. |
 | Replay of a leaked internal JWT | Existing TTL ≤ 5 min + Kong's `maximum_expiration: 600` + bearer-bound `sid` (see [`auth-architecture.md`](auth-architecture.md) §C). |
-| Privilege escalation by setting `phoneNumberVerified=true` from the client | Attribute write goes through the **BFF**, never the mobile app. BFF uses the `mobile-bff` service-account token; mobile has no path to the Admin API. |
+| Privilege escalation by setting `phoneNumberVerified=true` from the client | Attribute write goes through the **BFF**, never the mobile app. BFF uses the `super-app-bff` service-account token; mobile has no path to the Admin API. |
 | Header spoofing (`X-Phone-Number-Verified` from the client) | Kong's `pre-function` plugin strips inbound identity headers before decoding and injecting trusted ones — same pattern as `X-User-Id` today. |
 | Admin-API endpoint exposure | The Admin API lives on Keycloak, reachable only from the Docker network; BFF is the only container with the service-account credentials. |
 

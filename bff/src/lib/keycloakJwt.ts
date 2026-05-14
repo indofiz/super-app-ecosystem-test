@@ -29,6 +29,11 @@ export interface KeycloakIdClaims {
   email?: string;
   email_verified?: boolean;
   name?: string;
+  // Present when the `phone` scope is granted to the client. Sourced from
+  // the `phoneNumber` / `phoneNumberVerified` user attributes by KC's
+  // built-in phone scope.
+  phone_number?: string;
+  phone_number_verified?: boolean;
 }
 
 /** Subset of KC access_token claims we read. KC's access tokens carry
@@ -41,6 +46,10 @@ export interface KeycloakAccessClaims {
   azp?: string;
   realm_access?: { roles?: string[] };
   resource_access?: Record<string, { roles?: string[] }>;
+  email?: string;
+  email_verified?: boolean;
+  phone_number?: string;
+  phone_number_verified?: boolean;
 }
 
 export interface KeycloakLogoutTokenClaims {
@@ -196,6 +205,9 @@ export const createKeycloakJwtVerifier = (
 export interface VerifiedProfile {
   username?: string;
   email?: string;
+  emailVerified: boolean;
+  phoneNumber?: string;
+  phoneNumberVerified: boolean;
   roles: string[];
 }
 
@@ -224,11 +236,22 @@ export const verifyAndExtractProfile = async (
   const idClaims = idToken ? await verifier.verifyIdToken(idToken) : null;
   const acClaims = accessToken ? await verifier.verifyAccessToken(accessToken) : null;
   const sub = idClaims?.sub ?? acClaims?.sub ?? fallbackSub;
+  // Prefer the access_token for verification flags — KC writes the
+  // freshest user-attribute view there. id_token is the fallback if the
+  // `phone` scope wasn't granted on the AC.
+  const emailVerified =
+    acClaims?.email_verified ?? idClaims?.email_verified ?? false;
+  const phoneNumber = acClaims?.phone_number ?? idClaims?.phone_number;
+  const phoneNumberVerified =
+    acClaims?.phone_number_verified ?? idClaims?.phone_number_verified ?? false;
   return {
     sub,
     profile: {
       username: idClaims?.preferred_username,
-      email: idClaims?.email,
+      email: idClaims?.email ?? acClaims?.email,
+      emailVerified,
+      phoneNumber,
+      phoneNumberVerified,
       roles: acClaims?.realm_access?.roles ?? [],
     },
   };

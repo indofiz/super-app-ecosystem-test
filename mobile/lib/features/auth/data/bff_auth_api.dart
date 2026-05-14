@@ -85,4 +85,70 @@ class BffAuthApi {
     );
     return res.data ?? const {};
   }
+
+  /// POST /auth/email/send-otp — 202 with `{delivery, expires_in}`, or
+  /// 200 with `{verified: true}` if the email is already verified.
+  Future<({String delivery, int expiresIn, bool alreadyVerified})>
+      sendEmailOtp(String bearer) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/auth/email/send-otp',
+      data: const <String, dynamic>{},
+      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
+    );
+    final body = res.data ?? const {};
+    return (
+      delivery: (body['delivery'] as String?) ?? 'email',
+      expiresIn: (body['expires_in'] as num?)?.toInt() ?? 300,
+      alreadyVerified: body['verified'] == true,
+    );
+  }
+
+  /// POST /auth/email/verify-otp — 200 with a fresh session on success.
+  Future<({String accessToken, String sessionId, int expiresIn})>
+      verifyEmailOtp(String bearer, String code) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/auth/email/verify-otp',
+      data: {'code': code},
+      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
+    );
+    final body = res.data ?? const {};
+    return (
+      accessToken: body['access_token'] as String,
+      sessionId: body['session_id'] as String,
+      expiresIn: (body['expires_in'] as num).toInt(),
+    );
+  }
+
+  /// POST /auth/phone/send-otp — 202 with `{delivery, expires_in}`, or
+  /// 200 with `{verified: true}` if the phone is already verified.
+  Future<({String delivery, int expiresIn, bool alreadyVerified})>
+      sendPhoneOtp(String bearer, String phone) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/auth/phone/send-otp',
+      data: {'phone': phone},
+      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
+    );
+    final body = res.data ?? const {};
+    return (
+      delivery: (body['delivery'] as String?) ?? 'wa',
+      expiresIn: (body['expires_in'] as num?)?.toInt() ?? 300,
+      alreadyVerified: body['verified'] == true,
+    );
+  }
+
+  /// POST /auth/phone/verify-otp — 200 with a fresh session on success.
+  Future<({String accessToken, String sessionId, int expiresIn})>
+      verifyPhoneOtp(String bearer, String phone, String code) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/auth/phone/verify-otp',
+      data: {'phone': phone, 'code': code},
+      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
+    );
+    final body = res.data ?? const {};
+    return (
+      accessToken: body['access_token'] as String,
+      sessionId: body['session_id'] as String,
+      expiresIn: (body['expires_in'] as num).toInt(),
+    );
+  }
 }

@@ -91,6 +91,22 @@ services:
       BFF_INTERNAL_JWT_TTL_SECONDS: ${BFF_INTERNAL_JWT_TTL_SECONDS:-300}
       BFF_INTERNAL_JWT_ISSUER: ${BFF_INTERNAL_JWT_ISSUER:-super-app-bff}
       BFF_INTERNAL_JWT_AUDIENCE: ${BFF_INTERNAL_JWT_AUDIENCE:-super-app-services}
+      # WhatsApp OTP (Fonnte). Empty token → BFF wires the stub sender,
+      # which logs the OTP and returns 202 without contacting Fonnte. Set
+      # FONNTE_TOKEN in the host .env (or shell env) for real delivery.
+      FONNTE_TOKEN: ${FONNTE_TOKEN:-}
+      FONNTE_BASE_URL: ${FONNTE_BASE_URL:-https://api.fonnte.com}
+      # Email OTP (Gmail SMTP for MVP). Same stub-vs-live pattern as
+      # Fonnte: empty SMTP_USER/SMTP_PASS → BFF logs OTPs and returns 202
+      # without sending. Gmail requires an App Password, not the account
+      # password (myaccount.google.com/apppasswords).
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-300}
+      OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS:-5}
     # No host port mapping — only nginx talks to the BFF.
     # AUDIT A-3: real readiness gate so nginx's service_healthy depends_on
     # actually waits for Express to bind. /healthz is the cheap liveness

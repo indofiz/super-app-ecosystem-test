@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 
 import '../../../core/config/app_config.dart';
@@ -45,7 +46,10 @@ class BffAuthRepository implements AuthRepository {
     required String sessionId,
     required DateTime expiresAt,
   }) =>
-      AuthSession(
+      // `fromToken` decodes the JWT payload and seeds emailVerified /
+      // phoneNumberVerified from the BFF-signed claims. Avoids a /auth/me
+      // round-trip after every refresh just to read the flags.
+      AuthSession.fromToken(
         accessToken: accessToken,
         sessionId: sessionId,
         expiresAt: expiresAt,
@@ -231,8 +235,123 @@ class BffAuthRepository implements AuthRepository {
       sub: (body['sub'] as String?) ?? '',
       username: body['username'] as String?,
       email: body['email'] as String?,
+      emailVerified: body['emailVerified'] == true,
+      phoneNumber: body['phoneNumber'] as String?,
+      phoneNumberVerified: body['phoneNumberVerified'] == true,
       roles: roles,
       expiresAt: expiresAt,
     );
+  }
+
+  @override
+  Future<Duration> sendEmailOtp() async {
+    final stored = await secureStore.readSession();
+    if (stored == null) throw AuthFailure('Not authenticated');
+    try {
+      final res = await _api.sendEmailOtp(stored.accessToken);
+      _log('sendEmailOtp: delivery=${res.delivery} '
+          'alreadyVerified=${res.alreadyVerified}');
+      return Duration(seconds: res.expiresIn);
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: 'Gagal mengirim OTP email.');
+    }
+  }
+
+  @override
+  Future<AuthSession> verifyEmailOtp(String code) async {
+    final stored = await secureStore.readSession();
+    if (stored == null) throw AuthFailure('Not authenticated');
+    try {
+      final res = await _api.verifyEmailOtp(stored.accessToken, code);
+      final session = _toSession(
+        accessToken: res.accessToken,
+        sessionId: res.sessionId,
+        expiresAt: DateTime.now().add(Duration(seconds: res.expiresIn)),
+      );
+      await secureStore.writeSession(
+        accessToken: session.accessToken,
+        sessionId: session.sessionId,
+        expiresAt: session.expiresAt,
+      );
+      _controller.add(session);
+      _log('verifyEmailOtp: SUCCESS');
+      return session;
+    } on DioException catch (e) {
+      throw _mapVerifyDio(e);
+    }
+  }
+
+  @override
+  Future<Duration> sendPhoneOtp(String phone) async {
+    final stored = await secureStore.readSession();
+    if (stored == null) throw AuthFailure('Not authenticated');
+    try {
+      final res = await _api.sendPhoneOtp(stored.accessToken, phone);
+      _log('sendPhoneOtp: delivery=${res.delivery} '
+          'alreadyVerified=${res.alreadyVerified}');
+      return Duration(seconds: res.expiresIn);
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: 'Gagal mengirim OTP WhatsApp.');
+    }
+  }
+
+  @override
+  Future<AuthSession> verifyPhoneOtp(String phone, String code) async {
+    final stored = await secureStore.readSession();
+    if (stored == null) throw AuthFailure('Not authenticated');
+    try {
+      final res = await _api.verifyPhoneOtp(stored.accessToken, phone, code);
+      final session = _toSession(
+        accessToken: res.accessToken,
+        sessionId: res.sessionId,
+        expiresAt: DateTime.now().add(Duration(seconds: res.expiresIn)),
+      );
+      await secureStore.writeSession(
+        accessToken: session.accessToken,
+        sessionId: session.sessionId,
+        expiresAt: session.expiresAt,
+      );
+      _controller.add(session);
+      _log('verifyPhoneOtp: SUCCESS');
+      return session;
+    } on DioException catch (e) {
+      throw _mapVerifyDio(e);
+    }
+  }
+
+  /// Map a Dio error from a verify-OTP call into the typed failures the
+  /// bloc expects. The BFF's error vocabulary:
+  ///   - 410 otp_expired / otp_exhausted → OtpExpiredFailure
+  ///   - 422 otp_invalid (with attempts_left) → OtpInvalidFailure
+  ///   - everything else → generic AuthFailure
+  AuthFailure _mapVerifyDio(DioException e) {
+    final status = e.response?.statusCode;
+    final body = e.response?.data;
+    if (status == 410) {
+      return OtpExpiredFailure(cause: e);
+    }
+    if (status == 422 && body is Map) {
+      // BFF puts `attempts_left` inside the HttpError detail. The error
+      // middleware projects it as `{error, error_description, detail}`.
+      final detail = body['detail'];
+      final attemptsLeft = detail is Map && detail['attempts_left'] is num
+          ? (detail['attempts_left'] as num).toInt()
+          : 0;
+      return OtpInvalidFailure(attemptsLeft: attemptsLeft, cause: e);
+    }
+    return _mapDio(e, fallback: 'Verifikasi gagal.');
+  }
+
+  AuthFailure _mapDio(DioException e, {required String fallback}) {
+    final body = e.response?.data;
+    String? desc;
+    if (body is Map && body['error_description'] is String) {
+      desc = body['error_description'] as String;
+    }
+    final retryable =
+        e.type == DioExceptionType.connectionTimeout ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.sendTimeout;
+    return AuthFailure(desc ?? fallback, cause: e, retryable: retryable);
   }
 }

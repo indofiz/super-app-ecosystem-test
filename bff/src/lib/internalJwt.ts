@@ -19,6 +19,13 @@ export interface InternalJwtClaims {
   sid: string;
   username?: string;
   email?: string;
+  /** Whether the user's email has cleared the BFF-mediated OTP verify
+   *  ceremony. Downstream services gate on this for verified-only features. */
+  email_verified: boolean;
+  /** E.164 phone number when present (`+62...`). */
+  phone_number?: string;
+  /** Whether the user's phone has cleared the BFF-mediated WA OTP ceremony. */
+  phone_number_verified: boolean;
   /** Distilled role list. Start with Keycloak's `realm_access.roles`. */
   roles: string[];
 }
@@ -102,6 +109,9 @@ export class InternalJwtIssuer {
       sid: claims.sid,
       username: claims.username,
       email: claims.email,
+      email_verified: claims.email_verified,
+      phone_number: claims.phone_number,
+      phone_number_verified: claims.phone_number_verified,
       roles: claims.roles,
       kid: this.activeKid,
     })

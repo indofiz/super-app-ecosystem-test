@@ -81,15 +81,26 @@ For a deployment walkthrough of the back-end this app talks to, see
 
 After login, Home renders:
 
-- The decoded **internal JWT** (sub, sid, username, email, roles, exp, …)
+- A **verification banner** (top of screen) when either `email_verified` or
+  `phone_number_verified` is false on the current JWT. Tapping it opens the
+  `/verify` route — a hub with one card per channel + entry points to the
+  email OTP and phone WA OTP screens. Soft gate: the rest of Home stays
+  usable; specific features can hard-gate later per-feature.
+- The decoded **internal JWT** (sub, sid, username, email, email_verified,
+  phone_number, phone_number_verified, roles, exp, …)
 - A `GET /auth/me` button — calls the **BFF** with the bearer; verifies the
   full auth boundary works and returns the cached profile snapshot.
 - A `GET /api/profile` button — calls **Kong → sample-service** with the
   bearer; verifies Kong's bundled `jwt` plugin accepts the BFF-minted token
   and the upstream chain works end-to-end.
 
-Both buttons fail if the workspace stack isn't up or the bearer is expired
-(refresh via the toolbar's circular-arrow button).
+Both `/me` and `/api/profile` buttons fail if the workspace stack isn't up
+or the bearer is expired (refresh via the toolbar's circular-arrow button).
+
+In mock mode (`USE_MOCK_AUTH=true`), the verification flow is fully
+exercisable: **`123456` is the magic accepted OTP for both channels.**
+Any other 6-digit input yields an `OtpInvalidFailure` with `attemptsLeft=4`
+so the "sisa percobaan" UX path is also testable.
 
 ## When you're ready for real auth
 
@@ -112,11 +123,18 @@ lib/
     router/    GoRouter + auth-driven redirects
   features/
     auth/
-      domain/         AuthRepository, AuthSession, UserProfile, AuthFailure
+      domain/         AuthRepository, AuthSession, UserProfile, AuthFailure,
+                      OtpInvalidFailure, OtpExpiredFailure, JwtClaims
       data/           BffAuthRepository, MockAuthRepository, BffAuthApi
       presentation/   AuthBloc, LoginScreen, SplashScreen
     home/
-      presentation/   HomeScreen (JWT preview + /me + /api/profile demos)
+      presentation/   HomeScreen (banner + JWT preview + /me + /api/profile demos),
+                      widgets/VerificationBanner
+    verification/
+      presentation/
+        bloc/         VerificationBloc (two parallel channels: email + phone)
+        screens/      VerificationScreen, EmailOtpScreen, PhoneOtpScreen
+        widgets/      OtpInput (6-digit), ResendTimer
     sample/
       data/           SampleApi (calls /api/profile through Kong)
 ```

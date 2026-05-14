@@ -18,11 +18,15 @@ const main = async () => {
   const { createApp } = await import('./app.js');
   const { AuthStateStore } = await import('./auth/stores/authState.store.js');
   const { BffCodeStore } = await import('./auth/stores/bffCode.store.js');
+  const { OtpStore } = await import('./auth/stores/otp.store.js');
   const { SessionStore } = await import('./auth/stores/session.store.js');
   const { UserSessionsStore } = await import('./auth/stores/userSessions.store.js');
+  const { buildEmailOtpFromEnv } = await import('./lib/emailOtp.js');
   const { InternalJwtIssuer } = await import('./lib/internalJwt.js');
   const { KeycloakClient } = await import('./lib/keycloak.js');
+  const { buildKeycloakAdmin, parseRealmFromIssuer } = await import('./lib/keycloakAdmin.js');
   const { createKeycloakJwtVerifier } = await import('./lib/keycloakJwt.js');
+  const { buildWaOtpFromEnv } = await import('./lib/waOtp.js');
   const redis = createRedis(env, log);
   // Metrics bundle is always built; the /metrics route is only mounted
   // when METRICS_ENABLED. Building it unconditionally keeps the KC client
@@ -52,6 +56,22 @@ const main = async () => {
     ttlSeconds: env.BFF_INTERNAL_JWT_TTL_SECONDS,
   });
 
+  // Verification dependencies (Phase 1). The admin client uses the same
+  // `super-app-bff` credentials as the OAuth flows — the realm needs the
+  // service account to hold `manage-users` + `view-users` (see Phase 0.1
+  // of docs/registration-and-verification.md).
+  const { realm, baseUrl } = parseRealmFromIssuer(env.KC_ISSUER);
+  const keycloakAdmin = buildKeycloakAdmin({
+    keycloak,
+    realm,
+    baseUrl: env.KC_ADMIN_BASE_URL ?? baseUrl,
+    clientId: env.KC_CLIENT_ID,
+    clientSecret: env.KC_CLIENT_SECRET,
+    log,
+  });
+  const emailOtp = buildEmailOtpFromEnv(env, log);
+  const waOtp = buildWaOtpFromEnv(env, log);
+
   const app = createApp({
     env,
     log,
@@ -63,10 +83,14 @@ const main = async () => {
       redis,
       keycloak,
       keycloakJwtVerifier,
+      keycloakAdmin,
       authStateStore: new AuthStateStore(redis, env.AUTHSTATE_TTL_SECONDS),
       bffCodeStore: new BffCodeStore(redis, env.BFFCODE_TTL_SECONDS),
       sessionStore: new SessionStore(redis, env.SESSION_TTL_SECONDS),
       userSessionsStore: new UserSessionsStore(redis, env.SESSION_TTL_SECONDS),
+      otpStore: new OtpStore(redis, env.OTP_TTL_SECONDS),
+      emailOtp,
+      waOtp,
       internalJwtIssuer,
       metrics,
       log,

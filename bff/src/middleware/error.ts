@@ -36,7 +36,13 @@ export const errorMiddleware =
         const reason = FAILED_AUTH_CODES.has(err.code) ? err.code : 'other';
         metrics.authFailedTotal.inc({ reason });
       }
-      res.status(err.status).json({ error: err.code, error_description: err.message });
+      res.status(err.status).json({
+        error: err.code,
+        error_description: err.message,
+        // Only echoed when the handler explicitly opted in via
+        // `publicDetail`. `detail` (server-side-only) is never on the wire.
+        ...(err.publicDetail ? { detail: err.publicDetail } : {}),
+      });
       return;
     }
     log.error({ err, path: req.path }, 'unhandled error');

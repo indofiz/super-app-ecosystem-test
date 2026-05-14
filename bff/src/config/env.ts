@@ -29,7 +29,13 @@ const EnvSchema = z.object({
   KC_ISSUER: z.string().url(),
   KC_CLIENT_ID: z.string().min(1),
   KC_CLIENT_SECRET: z.string().min(1),
-  KC_SCOPES: z.string().min(1).default('openid profile email'),
+  // `phone` is required for KC to ship `phone_number` + `phone_number_verified`
+  // claims (sourced from the `phoneNumber` / `phoneNumberVerified` user attrs)
+  // on the access_token. Without it the OTP-verify path has no way to read
+  // the current verification state from upstream.
+  KC_SCOPES: z.string().min(1).default('openid profile email phone'),
+  // Realm-relative admin API base. Derived from KC_ISSUER if absent.
+  KC_ADMIN_BASE_URL: z.string().url().optional(),
 
   ALLOWED_APP_CLIENTS: z.string().min(1).transform(csv),
   ALLOWED_APP_REDIRECT_URIS: z.string().min(1).transform(csv),
@@ -124,6 +130,34 @@ const EnvSchema = z.object({
   BFF_INTERNAL_JWT_TTL_SECONDS: z.coerce.number().int().positive().max(60 * 30).default(300),
   BFF_INTERNAL_JWT_ISSUER: z.string().min(1).default('super-app-bff'),
   BFF_INTERNAL_JWT_AUDIENCE: z.string().min(1).default('super-app-services'),
+
+  // --- Email OTP (Gmail SMTP for MVP — swap adapter for SES/SendGrid later) ---
+  //
+  // Gmail requires:
+  //   - 2-Step Verification ON for the sending account
+  //   - an App Password (https://myaccount.google.com/apppasswords) — the
+  //     regular account password will be rejected
+  // Free-tier Gmail caps at ~500 sends/day; move to a real relay before
+  // production traffic.
+  SMTP_HOST: z.string().min(1).default('smtp.gmail.com'),
+  SMTP_PORT: z.coerce.number().int().positive().max(65535).default(587),
+  SMTP_USER: z.string().min(1).optional(),
+  SMTP_PASS: z.string().min(1).optional(),
+  SMTP_FROM: z.string().min(1).optional(),
+
+  // --- WhatsApp OTP (Fonnte for MVP) ---
+  // Token from the Fonnte device dashboard. Migrate to Meta Cloud API
+  // when volume justifies WABA verification (see docs/registration-and-
+  // verification.md §4.D).
+  FONNTE_TOKEN: z.string().min(1).optional(),
+  FONNTE_BASE_URL: z.string().url().default('https://api.fonnte.com'),
+
+  // --- OTP behaviour ---
+  // Single OTP record per (channel, user). TTL bounds the verify window;
+  // attempts cap prevents online brute force without rate-limiting the
+  // user out of resend.
+  OTP_TTL_SECONDS: z.coerce.number().int().positive().max(60 * 30).default(300),
+  OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().max(20).default(5),
 
   // Observability (IMPROVEMENT_PLAN §3.1). All default off — flip on per
   // environment. /metrics MUST NOT be reachable from the public internet;

@@ -1,0 +1,59 @@
+name: mobile
+
+# Runs only when the Flutter app actually changes — keeps PRs that only
+# touch the BFF or docs from spinning up a Flutter SDK download.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile.yml'
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile.yml'
+
+defaults:
+  run:
+    working-directory: mobile
+
+jobs:
+  test:
+    name: analyze + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # subosito/flutter-action handles SDK install + caching. `channel: stable`
+      # tracks the latest stable release; pin a specific `flutter-version` here
+      # if a release ever breaks CI before we can chase down the cause.
+      - name: setup flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # `.env` is gitignored but the bundled `.env.example` is committed.
+      # The harness reads `.env` at startup; copy the example so test
+      # builds boot cleanly without secrets.
+      - name: seed .env from example
+        run: cp .env.example .env
+
+      - name: pub get
+        run: flutter pub get
+
+      - name: analyze
+        run: flutter analyze
+
+      - name: test (with coverage)
+        run: flutter test --coverage
+
+      # Upload coverage as an artifact so reviewers can pull the lcov
+      # report without re-running tests. Mirrors the BFF workflow.
+      - name: upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-coverage
+          path: mobile/coverage/
+          if-no-files-found: ignore

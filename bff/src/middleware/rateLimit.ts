@@ -65,3 +65,33 @@ export const buildMeLimiter = (redis: Redis): RateLimitRequestHandler =>
     keyGenerator: (req) => req.claims?.sid ?? req.ip ?? 'unknown',
     message: { error: 'rate_limited', error_description: 'Too many /me requests' },
   });
+
+// OTP send limiter — per-`sub`, very tight. Each send actually emails or
+// WAs a real user, so the budget here is both a cost control (Gmail's
+// daily cap, Fonnte's per-message fee) and an abuse mitigation. 3 sends
+// per 10 min lets a user retry a couple of times if the first message
+// gets stuck, but blocks rapid resend loops.
+export const buildOtpSendLimiter = (redis: Redis): RateLimitRequestHandler =>
+  rateLimit({
+    store: buildStore(redis, 'rl:otp:send:'),
+    windowMs: 10 * 60_000,
+    limit: 3,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.claims?.sub ?? req.ip ?? 'unknown',
+    message: { error: 'rate_limited', error_description: 'Too many OTP send requests' },
+  });
+
+// OTP verify limiter — per-`sub`, more permissive than send because the
+// in-record `attempts` counter (see otp.store.ts) is the real brute-force
+// cap. This limiter just stops a sustained attack from filling logs.
+export const buildOtpVerifyLimiter = (redis: Redis): RateLimitRequestHandler =>
+  rateLimit({
+    store: buildStore(redis, 'rl:otp:verify:'),
+    windowMs: 10 * 60_000,
+    limit: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.claims?.sub ?? req.ip ?? 'unknown',
+    message: { error: 'rate_limited', error_description: 'Too many OTP verify requests' },
+  });

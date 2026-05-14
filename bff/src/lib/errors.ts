@@ -18,13 +18,24 @@ export class HttpError extends Error {
   public readonly code: string;
   /** Optional detail for server-side logs only. Never sent to the client. */
   public readonly detail?: unknown;
+  /** Optional structured payload that IS echoed back to the client as
+   *  `detail` in the JSON body. Use ONLY for server-determined, safe
+   *  values (e.g. `{attempts_left: 3}`). Never echo user input here. */
+  public readonly publicDetail?: Record<string, unknown>;
 
-  constructor(status: number, code: string, message: string, detail?: unknown) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    detail?: unknown,
+    publicDetail?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = 'HttpError';
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.publicDetail = publicDetail;
   }
 }
 
@@ -36,6 +47,16 @@ export const unauthorized = (code: string, message: string, detail?: unknown) =>
 
 export const forbidden = (code: string, message: string, detail?: unknown) =>
   new HttpError(403, code, message, detail);
+
+export const unprocessable = (
+  code: string,
+  message: string,
+  detail?: unknown,
+  publicDetail?: Record<string, unknown>,
+) => new HttpError(422, code, message, detail, publicDetail);
+
+export const gone = (code: string, message: string, detail?: unknown) =>
+  new HttpError(410, code, message, detail);
 
 export const upstream = (code: string, message: string, detail?: unknown) =>
   new HttpError(502, code, message, detail);

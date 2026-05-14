@@ -100,6 +100,9 @@ export const makeRefreshHandler = (deps: {
         sid: parsed.data.session_id,
         username: extracted.profile.username,
         email: extracted.profile.email,
+        email_verified: extracted.profile.emailVerified,
+        phone_number: extracted.profile.phoneNumber,
+        phone_number_verified: extracted.profile.phoneNumberVerified,
         roles: extracted.profile.roles,
       });
 

@@ -5,6 +5,11 @@ import { RedisJsonStore } from './redisJson.store.js';
 export const SessionProfileZ = z.object({
   username: z.string().optional(),
   email: z.string().optional(),
+  // Defaults keep pre-verification-feature sessions readable post-deploy.
+  // New sessions will always have explicit values from the upstream JWT.
+  emailVerified: z.boolean().default(false),
+  phoneNumber: z.string().optional(),
+  phoneNumberVerified: z.boolean().default(false),
   roles: z.array(z.string()),
 });
 

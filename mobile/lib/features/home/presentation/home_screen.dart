@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../auth/domain/auth_repository.dart';
+import '../../auth/domain/auth_session.dart';
 import '../../auth/presentation/bloc/auth_bloc.dart';
 import '../../sample/data/sample_api.dart';
+import 'widgets/verification_banner.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -83,72 +85,88 @@ class _HomeScreenState extends State<HomeScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           final claims = _decodeClaims(session.accessToken);
-          return ListView(
-            padding: const EdgeInsets.all(16),
+          return Column(
             children: [
-              _row('session_id', session.sessionId),
-              _row('expires_at', session.expiresAt.toIso8601String()),
-              _row(
-                'access_token (preview)',
-                '${session.accessToken.substring(0, session.accessToken.length.clamp(0, 24))}…',
+              const VerificationBanner(),
+              Expanded(
+                child: _content(context, state, session, claims),
               ),
-              const Divider(height: 32),
-              Text(
-                'Decoded internal JWT',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              SelectableText(const JsonEncoder.withIndent('  ').convert(claims)),
-              const Divider(height: 32),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: [
-                  FilledButton.icon(
-                    onPressed: _busy ? null : _fetchMe,
-                    icon: const Icon(Icons.person_outline),
-                    label: const Text('GET /auth/me  (BFF)'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: _busy ? null : _fetchApiProfile,
-                    icon: const Icon(Icons.cloud_outlined),
-                    label: const Text('GET /api/profile  (Kong → service)'),
-                  ),
-                ],
-              ),
-              if (_busy) ...[
-                const SizedBox(height: 16),
-                const LinearProgressIndicator(),
-              ],
-              if (_error != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ],
-              if (_meResult != null) ...[
-                const Divider(height: 32),
-                Text(
-                  '/auth/me response',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                SelectableText(_meResult!),
-              ],
-              if (_apiResult != null) ...[
-                const Divider(height: 32),
-                Text(
-                  '/api/profile response',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                SelectableText(_apiResult!),
-              ],
             ],
           );
         },
       ),
+    );
+  }
+
+  Widget _content(
+    BuildContext context,
+    AuthState state,
+    AuthSession session,
+    Map<String, dynamic> claims,
+  ) {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        _row('session_id', session.sessionId),
+        _row('expires_at', session.expiresAt.toIso8601String()),
+        _row(
+          'access_token (preview)',
+          '${session.accessToken.substring(0, session.accessToken.length.clamp(0, 24))}…',
+        ),
+        const Divider(height: 32),
+        Text(
+          'Decoded internal JWT',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        SelectableText(const JsonEncoder.withIndent('  ').convert(claims)),
+        const Divider(height: 32),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              onPressed: _busy ? null : _fetchMe,
+              icon: const Icon(Icons.person_outline),
+              label: const Text('GET /auth/me  (BFF)'),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: _busy ? null : _fetchApiProfile,
+              icon: const Icon(Icons.cloud_outlined),
+              label: const Text('GET /api/profile  (Kong → service)'),
+            ),
+          ],
+        ),
+        if (_busy) ...[
+          const SizedBox(height: 16),
+          const LinearProgressIndicator(),
+        ],
+        if (_error != null) ...[
+          const SizedBox(height: 16),
+          Text(
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        if (_meResult != null) ...[
+          const Divider(height: 32),
+          Text(
+            '/auth/me response',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          SelectableText(_meResult!),
+        ],
+        if (_apiResult != null) ...[
+          const Divider(height: 32),
+          Text(
+            '/api/profile response',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          SelectableText(_apiResult!),
+        ],
+      ],
     );
   }
 

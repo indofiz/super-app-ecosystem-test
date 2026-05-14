@@ -1,5 +1,5 @@
 import type { Redis } from 'ioredis';
-import type { ZodType } from 'zod';
+import type { ZodType, ZodTypeDef } from 'zod';
 import { upstream } from '../../lib/errors.js';
 
 /**
@@ -19,7 +19,11 @@ export class RedisJsonStore<T> {
     protected readonly redis: Redis,
     protected readonly prefix: string,
     protected readonly ttlSeconds: number,
-    protected readonly schema: ZodType<T>,
+    // `ZodType<T, ZodTypeDef, unknown>` — input can be anything; the
+    // schema's job is to parse `unknown` into `T`. Lets stores with
+    // `.default()` fields (where input is optional but output is
+    // required) satisfy this signature without losing T-typing.
+    protected readonly schema: ZodType<T, ZodTypeDef, unknown>,
   ) {}
 
   protected key(id: string): string {

@@ -17,12 +17,16 @@ void main() {
         accessToken: 'jwt',
         sessionId: 'sid-1',
         expiresAt: DateTime.now().add(const Duration(minutes: 5)),
+        emailVerified: false,
+        phoneNumberVerified: false,
       );
 
   AuthSession expiredSession() => AuthSession(
         accessToken: 'jwt-old',
         sessionId: 'sid-1',
         expiresAt: DateTime.now().subtract(const Duration(seconds: 1)),
+        emailVerified: false,
+        phoneNumberVerified: false,
       );
 
   setUp(() {

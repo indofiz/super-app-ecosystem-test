@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(flutter analyze lib/core/router/app_router.dart lib/features/verification)",
+      "PowerShell(flutter test test/features/verification/)"
+    ]
+  }
+}

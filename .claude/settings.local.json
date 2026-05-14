@@ -19,7 +19,11 @@
       "PowerShell(Get-ChildItem \"D:\\\\DISKOMINFO\\\\super-app-ecosystem-test\\\\bff\" -Force -Name | Where-Object { $_ -match '^\\\\.' })",
       "Bash(flutter test *)",
       "Bash(dir *)",
-      "Bash(docker exec *)"
+      "Bash(docker exec *)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\DISKOMINFO\\\\super-app-ecosystem-test\\\\mobile\\\\lib\" -Recurse -Force | Where-Object { -not $_.PSIsContainer } | Select-Object FullName)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\DISKOMINFO\\\\super-app-ecosystem-test\\\\mobile\\\\lib\" -Recurse -File | ForEach-Object { $_.FullName })",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\DISKOMINFO\\\\super-app-ecosystem-test\\\\bff\" -Recurse -File | ForEach-Object { $_.FullName })",
+      "Bash(npx vitest *)"
     ]
   }
 }

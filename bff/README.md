@@ -13,7 +13,11 @@ admin, etc.) never see Keycloak directly and never hold a refresh token.
 | `POST` | `/auth/token`              | App POSTs `code + code_verifier` → `{access_token, token_type, expires_in, scope, session_id}`. PKCE verified here. The internal JWT *is* `access_token`; Keycloak's `id_token` never leaves the BFF. |
 | `POST` | `/auth/refresh`            | Header `Authorization: Bearer <jwt>` + body `{session_id}` → fresh `access_token`. Bearer's `sid` claim must match `session_id`. Accepts bearers expired ≤24h. |
 | `POST` | `/auth/logout`             | Header `Authorization: Bearer <jwt>` + body `{session_id}` → invalidates Redis + Keycloak session. Same bearer/`sid` binding as `/refresh`. |
-| `GET`  | `/auth/me`                 | Header `Authorization: Bearer <jwt>` (strict, no grace window) → `{sub, username, email, roles, expiresAt}`. Reads the profile snapshot saved at login/refresh; bounded staleness ≤ refresh cycle. |
+| `GET`  | `/auth/me`                 | Header `Authorization: Bearer <jwt>` (strict, no grace window) → `{sub, username, email, emailVerified, phoneNumber, phoneNumberVerified, roles, expiresAt}`. Reads the profile snapshot saved at login/refresh; bounded staleness ≤ refresh cycle. |
+| `POST` | `/auth/email/send-otp`     | Sends a 6-digit OTP to the session's email via SMTP. Bearer required. `202 {delivery, expires_in}` (or `200 {verified:true}` if already verified). Per-`sub` rate-limited to 3/10min. |
+| `POST` | `/auth/email/verify-otp`   | Body `{code}`. On success, sets `emailVerified=true` in Keycloak via Admin API, re-mints the internal JWT with `email_verified=true`, returns `{verified, access_token, expires_in, session_id}`. Errors: `422 otp_invalid` (with `detail.attempts_left`), `410 otp_expired` / `otp_exhausted`. |
+| `POST` | `/auth/phone/send-otp`     | Body `{phone}` in `^\+62\d{8,12}$`. Sends WA OTP via Fonnte. Same response/limits as email send. |
+| `POST` | `/auth/phone/verify-otp`   | Body `{phone, code}`. Phone in body must match the issued OTP's destination. Writes `phoneNumber` + `phoneNumberVerified=true` to Keycloak. Re-mints internal JWT. Same error vocabulary as email verify. |
 | `GET`  | `/healthz`                 | Liveness — no I/O. Cheap; used by compose / k8s startup probes. |
 | `GET`  | `/readyz`                  | Readiness — pings Redis (1s timeout) and Keycloak discovery (1s timeout). 503 on any failure. |
 | `GET`  | `/livez`                   | Liveness with event-loop check. 503 if loop p99 > 1 s. |
@@ -92,6 +96,10 @@ See `.env.example`. The non-obvious knobs:
 - `ALLOWED_APP_CLIENTS` — CSV of `client_id` values the app may send. **Not** relayed to Keycloak; this is the BFF's own allowlist.
 - `ALLOWED_APP_REDIRECT_URIS` — CSV exact-match allowlist for deeplink return URIs. Anything not on this list is rejected at `/auth/authorize`.
 - `PUBLIC_BASE_URL` — must be reachable from the user's browser during the OAuth redirect. The BFF builds its own callback URL as `${PUBLIC_BASE_URL}/auth/callback`. Register this with Keycloak.
+- `KC_SCOPES` — must include `phone` for the verification flow to read `phone_number_verified` from upstream. Default does this.
+- `SMTP_USER` / `SMTP_PASS` — Gmail App Password (NOT the regular password). 2-Step Verification must be on for the sending account. See `.env.example` for the link to generate one. Leave blank in dev to log OTPs to stdout instead of mailing them.
+- `FONNTE_TOKEN` — device token from https://md.fonnte.com after connecting a WhatsApp number. Leave blank in dev to log OTPs to stdout.
+- `OTP_TTL_SECONDS` / `OTP_MAX_ATTEMPTS` — OTP validity window and per-OTP wrong-guess budget.
 
 ## Redis keyspace
 
@@ -99,7 +107,9 @@ See `.env.example`. The non-obvious knobs:
 |---|---|---|
 | `authstate:<bff_state>` | 10m | App PKCE + deeplink, generated at `/authorize`, single-use at `/callback`. |
 | `bffcode:<bff_authcode>` | 5m | Tokens received from Keycloak, single-use at `/token`. |
-| `session:<session_id>` | 30d | Long-lived: refresh_token, sub. Rotated on `/refresh`. |
+| `session:<session_id>` | 30d | Long-lived: refresh_token, sub, profile snapshot. Rotated on `/refresh`. |
+| `otp:<channel>:<sub>` | 5m | One in-flight OTP per (email\|phone, user). Plaintext code never stored — only `sha256(code:sub)`. |
+| `otp:<channel>:<sub>:attempts` | 5m | Wrong-guess counter. INCR per failed verify; purged together with the record on success or exhaustion. |
 
 ## Security notes
 
