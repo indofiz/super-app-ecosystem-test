@@ -8,8 +8,17 @@ export const SessionProfileZ = z.object({
   // Defaults keep pre-verification-feature sessions readable post-deploy.
   // New sessions will always have explicit values from the upstream JWT.
   emailVerified: z.boolean().default(false),
+  fullName: z.string().optional(),
   phoneNumber: z.string().optional(),
   phoneNumberVerified: z.boolean().default(false),
+  // ISO-8601 timestamps written by the BFF when the corresponding OTP
+  // verify succeeds (KC user attribute is the source of truth; this is
+  // the session-cache mirror so /auth/me can render without a KC GET).
+  // Users verified before this field existed read as undefined — honest
+  // null beats a synthetic backfill.
+  emailVerifiedAt: z.string().datetime().optional(),
+  phoneVerifiedAt: z.string().datetime().optional(),
+  nikVerifiedAt: z.string().datetime().optional(),
   roles: z.array(z.string()),
 });
 

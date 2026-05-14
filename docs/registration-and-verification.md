@@ -222,7 +222,7 @@ mobile (Flutter)         Custom Tab                  BFF                  Keyclo
    │                          │       ↓ user clicks "Daftar"                 │
    │                          │       ↓ registration form (KC theme)         │
    │                          │       ↓ fields: email, password×2, nik,      │
-   │                          │              phoneNumber, firstName, lastName│
+   │                          │              phoneNumber, fullName            │
    │                          │       ↓ User Profile validators run          │
    │                          │ ◄───────────────────────────────────────────│
    │                          │       Required-action chain runs:            │
@@ -561,11 +561,13 @@ implement D1 and delete the BFF endpoints from Phase 3.
 | Attribute | Source | Required | Verified flag |
 |---|---|---|---|
 | `email` | registration form | yes (username) | `emailVerified` (KC built-in) |
-| `firstName` | registration form | yes | n/a |
-| `lastName` | registration form | optional | n/a |
+| `fullName` | registration form (declarative UP) | yes | n/a — surfaced as the OIDC `name` claim via the `fullName` protocol mapper on `super-app-bff` |
 | `nik` | registration form (declarative UP) | yes | not separately verified in v1 |
 | `phoneNumber` | registration form or post-login screen | yes (eventually) | `phoneNumberVerified` (set by BFF after WA OTP) |
 | `phoneNumberVerified` | BFF Admin API write after OTP | n/a | this *is* the flag |
+| `emailVerifiedAt` | BFF Admin API write after email OTP verify | n/a | ISO-8601 audit timestamp; admin-edit-only |
+| `phoneVerifiedAt` | BFF Admin API write after phone OTP verify | n/a | ISO-8601 audit timestamp; admin-edit-only |
+| `nikVerifiedAt` | reserved (future Dukcapil flow) | n/a | declared admin-edit-only; no code writes it yet |
 
 ### 6.2 Internal JWT claims (after Phase 3)
 
@@ -733,72 +735,34 @@ profile snapshot returned by `/auth/me` (the BFF already returns
 
 ## Appendix A — Declarative User Profile snippet
 
-Paste under Realm Settings → User Profile (JSON editor). Strict enough
-to enforce shape; loose enough not to block real Indonesian data.
+The canonical User Profile JSON lives at
+[`keycloak/user-profile.json`](../keycloak/user-profile.json) — single
+source of truth, intentionally not duplicated here so the file and this
+doc cannot drift. Paste its full contents under Realm Settings → User
+Profile (JSON editor); the click-through is documented in
+[`realm-setup.md` §Step 3](./realm-setup.md#step-3--declare-phonenumber--phonenumberverified-in-user-profile--2-min).
 
-```json
-{
-  "attributes": [
-    {
-      "name": "username",
-      "displayName": "${username}",
-      "permissions": { "view": ["admin","user"], "edit": ["admin"] }
-    },
-    {
-      "name": "email",
-      "displayName": "${email}",
-      "validations": { "email": {}, "length": { "max": 255 } },
-      "required": { "roles": ["user"] },
-      "permissions": { "view": ["admin","user"], "edit": ["admin","user"] }
-    },
-    {
-      "name": "firstName",
-      "displayName": "${firstName}",
-      "validations": { "length": { "max": 255 }, "person-name-prohibited-characters": {} },
-      "required": { "roles": ["user"] },
-      "permissions": { "view": ["admin","user"], "edit": ["admin","user"] }
-    },
-    {
-      "name": "lastName",
-      "displayName": "${lastName}",
-      "validations": { "length": { "max": 255 }, "person-name-prohibited-characters": {} },
-      "permissions": { "view": ["admin","user"], "edit": ["admin","user"] }
-    },
-    {
-      "name": "nik",
-      "displayName": "NIK",
-      "validations": {
-        "length": { "min": 16, "max": 16 },
-        "pattern": { "pattern": "^\\d{16}$", "error-message": "NIK harus 16 digit angka" }
-      },
-      "required": { "roles": ["user"] },
-      "permissions": { "view": ["admin","user"], "edit": ["admin","user"] }
-    },
-    {
-      "name": "phoneNumber",
-      "displayName": "Nomor WhatsApp",
-      "validations": {
-        "pattern": { "pattern": "^\\+62\\d{8,12}$", "error-message": "Format: +62 diikuti 8-12 digit" }
-      },
-      "required": { "roles": ["user"] },
-      "permissions": { "view": ["admin","user"], "edit": ["admin","user"] }
-    },
-    {
-      "name": "phoneNumberVerified",
-      "displayName": "Phone Number Verified",
-      "permissions": { "view": ["admin"], "edit": ["admin"] }
-    }
-  ],
-  "groups": [
-    { "name": "user-metadata", "displayHeader": "User metadata", "displayDescription": "Attributes, which refer to user metadata" }
-  ]
-}
-```
+Naming uses **camelCase** (`phoneNumber`, `phoneNumberVerified`,
+`fullName`) deliberately:
+
+- KC's built-in `phone` client scope reads `phoneNumber` /
+  `phoneNumberVerified` directly — no custom protocol mapper needed for
+  the phone claims.
+- `fullName` replaces the built-in `firstName` / `lastName` pair so the
+  hosted registration form renders one "Nama Lengkap" field. It is
+  projected onto the OIDC `name` claim by the `fullName` protocol mapper
+  on `super-app-bff` (configured in
+  [`realm-setup.md` §Step 3b](./realm-setup.md#step-3b--add-the-fullname--name-protocol-mapper-on-super-app-bff--1-min)).
+  Without that mapper the BFF reads `fullName` as `null`.
+- The BFF Admin client (`bff/src/lib/keycloakAdmin.ts`) writes
+  `phoneNumber` / `phoneNumberVerified=true` after a successful WA OTP,
+  so the OIDC `phone` scope ships a fresh `phone_number_verified: true`
+  claim on the next access_token round-trip without any extra wiring.
 
 `phoneNumberVerified` is **admin-edit-only** so a malicious user cannot
-PATCH their own profile to set it to `true` (which would otherwise be
-possible if they got hold of an Admin API token). The BFF writes it via
-its service account; users see it as read-only.
+PATCH their own profile to set it to `true`. The BFF writes it via its
+service account (`super-app-bff` with `manage-users` from
+`realm-management`); end users see it as read-only.
 
 ---
 

@@ -132,93 +132,46 @@ Two reasons this is required:
 > profile** tab under Realm settings, you're either on a pre-24 build or
 > looking at the wrong realm.
 
+The canonical User Profile JSON lives at
+[`keycloak/user-profile.json`](../keycloak/user-profile.json) in this
+repo — that file is the single source of truth. Naming uses camelCase
+(`phoneNumber`, `phoneNumberVerified`, `fullName`) so the KC built-in
+`phone` client scope works without custom mappers for the phone claims,
+and so the BFF's Admin API writes (`bff/src/lib/keycloakAdmin.ts`) land
+in the same attribute the `phone` scope reads from. `fullName` replaces
+the built-in `firstName`/`lastName` pair and requires the extra protocol
+mapper in **Step 3b** below to surface as the OIDC `name` claim.
+
 1. Sidebar → **Realm settings**.
 2. Top tabs → **User profile**.
 3. Top tabs (still on User profile) → **JSON editor**.
-4. Replace the contents with the JSON below (it's the [Appendix A][appA]
-   snippet from the verification doc, unchanged). It declares `email`,
-   `firstName`, `lastName`, `nik`, `phoneNumber`, and
-   `phoneNumberVerified`.
-
-   ```json
-   {
-     "attributes": [
-       {
-         "name": "username",
-         "displayName": "${username}",
-         "permissions": { "view": ["admin", "user"], "edit": ["admin"] }
-       },
-       {
-         "name": "email",
-         "displayName": "${email}",
-         "validations": { "email": {}, "length": { "max": 255 } },
-         "required": { "roles": ["user"] },
-         "permissions": { "view": ["admin", "user"], "edit": ["admin", "user"] }
-       },
-       {
-         "name": "firstName",
-         "displayName": "${firstName}",
-         "validations": {
-           "length": { "max": 255 },
-           "person-name-prohibited-characters": {}
-         },
-         "required": { "roles": ["user"] },
-         "permissions": { "view": ["admin", "user"], "edit": ["admin", "user"] }
-       },
-       {
-         "name": "lastName",
-         "displayName": "${lastName}",
-         "validations": {
-           "length": { "max": 255 },
-           "person-name-prohibited-characters": {}
-         },
-         "permissions": { "view": ["admin", "user"], "edit": ["admin", "user"] }
-       },
-       {
-         "name": "nik",
-         "displayName": "NIK",
-         "validations": {
-           "length": { "min": 16, "max": 16 },
-           "pattern": {
-             "pattern": "^\\d{16}$",
-             "error-message": "NIK harus 16 digit angka"
-           }
-         },
-         "required": { "roles": ["user"] },
-         "permissions": { "view": ["admin", "user"], "edit": ["admin", "user"] }
-       },
-       {
-         "name": "phoneNumber",
-         "displayName": "Nomor WhatsApp",
-         "validations": {
-           "pattern": {
-             "pattern": "^\\+62\\d{8,12}$",
-             "error-message": "Format: +62 diikuti 8-12 digit"
-           }
-         },
-         "required": { "roles": ["user"] },
-         "permissions": { "view": ["admin", "user"], "edit": ["admin", "user"] }
-       },
-       {
-         "name": "phoneNumberVerified",
-         "displayName": "Phone Number Verified",
-         "permissions": { "view": ["admin"], "edit": ["admin"] }
-       }
-     ],
-     "groups": [
-       {
-         "name": "user-metadata",
-         "displayHeader": "User metadata",
-         "displayDescription": "Attributes, which refer to user metadata"
-       }
-     ]
-   }
-   ```
-
+4. Open [`keycloak/user-profile.json`](../keycloak/user-profile.json),
+   copy its full contents, and paste over whatever is in the editor.
+   It declares `username`, `email`, `fullName`, `nik`, `phoneNumber`,
+   `phoneNumberVerified`, and three admin-edit-only audit timestamps
+   (`emailVerifiedAt`, `phoneVerifiedAt`, `nikVerifiedAt`) under the
+   `user-metadata` group. The timestamps are ISO-8601 strings written by
+   the BFF after each successful OTP verify (`nikVerifiedAt` is
+   declared but not yet written — reserved for the future Dukcapil
+   integration).
 5. Click **Save**. KC validates the JSON before saving — if it rejects,
    the error message points at the offending field; fix and retry.
 6. (Optional but recommended) Switch to the **Attributes** tab and
    confirm each row shows up with the right validations.
+
+> **Existing users.** Removing `firstName`/`lastName` and adding a
+> required `fullName` means existing accounts no longer satisfy the
+> profile. The realm has `VERIFY_PROFILE` enabled as a Required Action;
+> on their next login each existing user is forced through
+> `UPDATE_PROFILE` to fill in `fullName`. No migration script required
+> for the dev/MVP user count. For bulk backfill at scale, write
+> `attributes.fullName = ["<firstName> <lastName>"]` via the Admin API.
+
+> **If you change attributes, edit the file — not the inline JSON.**
+> This doc used to duplicate the JSON inline; the duplicate drifted
+> against the file and produced the silent attribute-name mismatch
+> tracked in the verification flow. Keep `keycloak/user-profile.json`
+> as the only place this JSON lives.
 
 > **Why `phoneNumberVerified` is admin-edit-only.** The `permissions`
 > block scopes write access to the `admin` role only. The `super-app-bff`
@@ -237,8 +190,61 @@ Two reasons this is required:
 
 **Verify:** open the KC hosted registration page (just visit your
 auth_endpoint with the standard OAuth params and click "Daftar"). You
-should see `Nomor WhatsApp` and `NIK` rendered as required fields with
-their validators.
+should see `Nama Lengkap`, `Nomor WhatsApp`, and `NIK` rendered as
+required fields with their validators.
+
+---
+
+### Step 3b — Add the `fullName` → `name` protocol mapper on `super-app-bff` (≈ 1 min)
+
+Because we replaced KC's built-in `firstName` / `lastName` with a single
+custom `fullName` attribute, the OIDC `name` claim is no longer
+auto-populated by KC. The BFF reads `name` off the id_token / access_token
+to fill the `fullName` field on the session profile and `/auth/me`. Without
+this mapper, `fullName` will always come back as `null`.
+
+1. Sidebar → **Clients** → click `super-app-bff`.
+2. Top tabs → **Client scopes** → click the dedicated scope (named
+   `super-app-bff-dedicated`, the first row).
+3. Sub-tab → **Mappers** → **Add mapper** → **By configuration** →
+   **User Attribute**.
+4. Fill in:
+   - **Name:** `fullName`
+   - **User Attribute:** `fullName`
+   - **Token Claim Name:** `name`
+   - **Claim JSON Type:** `String`
+   - **Add to ID token:** On
+   - **Add to access token:** On
+   - **Add to userinfo:** On
+   - **Multivalued:** Off
+5. Click **Save**.
+
+**Verify:** after the next login, decode the access_token (BFF logs at
+`debug` level dump the upstream claims). Look for `"name": "<full name>"`.
+If absent, the mapper didn't save — re-open it and confirm the four
+toggles above.
+
+**CLI equivalent:**
+
+```bash
+CID=$(kcadm.sh get clients -r pangkalpinang -q clientId=super-app-bff --fields id --format csv --noquotes | tail -n1)
+kcadm.sh create clients/$CID/protocol-mappers/models -r pangkalpinang -f - <<'EOF'
+{
+  "name": "fullName",
+  "protocol": "openid-connect",
+  "protocolMapper": "oidc-usermodel-attribute-mapper",
+  "config": {
+    "user.attribute": "fullName",
+    "claim.name": "name",
+    "jsonType.label": "String",
+    "id.token.claim": "true",
+    "access.token.claim": "true",
+    "userinfo.token.claim": "true",
+    "multivalued": "false"
+  }
+}
+EOF
+```
 
 ---
 
@@ -372,5 +378,3 @@ kcadm.sh config credentials --server https://sso.pangkalpinangkota.go.id \
 ```
 
 ---
-
-[appA]: ./registration-and-verification.md#appendix-a-declarative-user-profile-snippet

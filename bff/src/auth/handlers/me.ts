@@ -33,8 +33,12 @@ export const makeMeHandler = (deps: {
         username: session.profile?.username ?? null,
         email: session.profile?.email ?? null,
         emailVerified: session.profile?.emailVerified ?? false,
+        emailVerifiedAt: session.profile?.emailVerifiedAt ?? null,
+        fullName: session.profile?.fullName ?? null,
         phoneNumber: session.profile?.phoneNumber ?? null,
         phoneNumberVerified: session.profile?.phoneNumberVerified ?? false,
+        phoneVerifiedAt: session.profile?.phoneVerifiedAt ?? null,
+        nikVerifiedAt: session.profile?.nikVerifiedAt ?? null,
         roles: session.profile?.roles ?? [],
         expiresAt: new Date(claims.exp * 1000).toISOString(),
       });

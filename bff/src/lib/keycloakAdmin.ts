@@ -24,8 +24,8 @@ import type { Logger } from './logger.js';
  * endpoint.
  */
 export interface KeycloakAdminClient {
-  setEmailVerified(sub: string): Promise<void>;
-  setPhoneVerified(sub: string, phone: string): Promise<void>;
+  setEmailVerified(sub: string, verifiedAt: string): Promise<void>;
+  setPhoneVerified(sub: string, phone: string, verifiedAt: string): Promise<void>;
 }
 
 const TokenResponseZ = z.object({
@@ -184,11 +184,14 @@ export const buildKeycloakAdmin = (opts: AdminOpts): KeycloakAdminClient => {
   };
 
   return {
-    async setEmailVerified(sub: string): Promise<void> {
+    async setEmailVerified(sub: string, verifiedAt: string): Promise<void> {
       // emailVerified is a top-level field on UserRepresentation, not an
       // attribute. We still GET-then-PUT to avoid clobbering other fields.
+      // emailVerifiedAt is an audit timestamp on the user's attributes —
+      // merge it alongside so the flag and timestamp land in the same
+      // PUT (no risk of a half-written user record).
       const token = await getToken();
-      let current: Record<string, unknown> = {};
+      let current: { attributes?: Record<string, string[]> } & Record<string, unknown> = {};
       try {
         const res = await client.get<Record<string, unknown>>(
           `${usersBase}/${encodeURIComponent(sub)}`,
@@ -202,13 +205,18 @@ export const buildKeycloakAdmin = (opts: AdminOpts): KeycloakAdminClient => {
           err instanceof Error ? err.message : err,
         );
       }
-      await putUser(sub, { ...current, emailVerified: true });
+      const mergedAttributes = {
+        ...(current.attributes ?? {}),
+        emailVerifiedAt: [verifiedAt],
+      };
+      await putUser(sub, { ...current, emailVerified: true, attributes: mergedAttributes });
     },
 
-    async setPhoneVerified(sub: string, phone: string): Promise<void> {
+    async setPhoneVerified(sub: string, phone: string, verifiedAt: string): Promise<void> {
       await mergeAttributes(sub, {
         phoneNumber: [phone],
         phoneNumberVerified: ['true'],
+        phoneVerifiedAt: [verifiedAt],
       });
     },
   };

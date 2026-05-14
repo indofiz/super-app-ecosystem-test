@@ -122,17 +122,20 @@ describe('KeycloakAdminClient', () => {
       http,
     });
 
-    await admin.setEmailVerified('user-1');
+    const verifiedAt = '2026-05-14T12:34:56.000Z';
+    await admin.setEmailVerified('user-1', verifiedAt);
 
     // 3 calls: token grant + GET user + PUT user
     expect(calls).toHaveLength(3);
     const put = calls[2]!;
     expect(put.method).toBe('PUT');
-    // Existing fields preserved + emailVerified flipped.
-    const body = put.data as Record<string, unknown>;
+    // Existing fields preserved + emailVerified flipped + timestamp merged
+    // into attributes without clobbering nik.
+    const body = put.data as { attributes: Record<string, string[]> } & Record<string, unknown>;
     expect(body.emailVerified).toBe(true);
     expect(body.email).toBe('andi@example.test');
-    expect(body.attributes).toEqual({ nik: ['1971010101010001'] });
+    expect(body.attributes.nik).toEqual(['1971010101010001']);
+    expect(body.attributes.emailVerifiedAt).toEqual([verifiedAt]);
     expect(put.headers['Authorization']).toBe('Bearer admin-tk-1');
   });
 
@@ -167,7 +170,8 @@ describe('KeycloakAdminClient', () => {
       http,
     });
 
-    await admin.setPhoneVerified('user-2', '+6281234567890');
+    const verifiedAt = '2026-05-14T12:34:56.000Z';
+    await admin.setPhoneVerified('user-2', '+6281234567890', verifiedAt);
 
     const put = calls.find((c) => c.method === 'PUT')!;
     const body = put.data as { attributes: Record<string, string[]> };
@@ -175,6 +179,7 @@ describe('KeycloakAdminClient', () => {
     expect(body.attributes['something_else']).toEqual(['keep me']);
     expect(body.attributes.phoneNumber).toEqual(['+6281234567890']);
     expect(body.attributes.phoneNumberVerified).toEqual(['true']);
+    expect(body.attributes.phoneVerifiedAt).toEqual([verifiedAt]);
   });
 
   it('caches the admin token across calls (one token grant for two writes)', async () => {
@@ -209,8 +214,8 @@ describe('KeycloakAdminClient', () => {
       log: silentLog,
       http,
     });
-    await admin.setEmailVerified('u');
-    await admin.setEmailVerified('u');
+    await admin.setEmailVerified('u', '2026-05-14T00:00:00.000Z');
+    await admin.setEmailVerified('u', '2026-05-14T00:00:01.000Z');
     expect(tokenGrants).toBe(1);
     // Verify the second call reused the cached token.
     const puts = calls.filter((c) => c.method === 'PUT');
@@ -242,7 +247,7 @@ describe('KeycloakAdminClient', () => {
       log: silentLog,
       http,
     });
-    await expect(admin.setEmailVerified('u')).rejects.toMatchObject({
+    await expect(admin.setEmailVerified('u', '2026-05-14T00:00:00.000Z')).rejects.toMatchObject({
       code: 'keycloak_admin_put_failed',
       status: 502,
     });

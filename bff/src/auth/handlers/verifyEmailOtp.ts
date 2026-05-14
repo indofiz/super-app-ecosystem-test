@@ -104,7 +104,10 @@ export const makeVerifyEmailOtpHandler = (deps: {
       // Match → atomically consume the record.
       await deps.otpStore.delete(key);
 
-      await deps.keycloakAdmin.setEmailVerified(claims.sub);
+      // Single timestamp shared between the KC write and the session-cache
+      // mirror so they don't drift by request latency.
+      const verifiedAt = new Date().toISOString();
+      await deps.keycloakAdmin.setEmailVerified(claims.sub, verifiedAt);
 
       // Update the cached session so the next /me reads the new flag
       // without needing a /refresh round-trip to KC.
@@ -115,6 +118,7 @@ export const makeVerifyEmailOtpHandler = (deps: {
           username: session.profile?.username,
           email: session.profile?.email,
           emailVerified: true,
+          emailVerifiedAt: verifiedAt,
           phoneNumber: session.profile?.phoneNumber,
           phoneNumberVerified: session.profile?.phoneNumberVerified ?? false,
           roles: session.profile?.roles ?? [],

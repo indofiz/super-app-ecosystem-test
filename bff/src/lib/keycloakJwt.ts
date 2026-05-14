@@ -48,6 +48,11 @@ export interface KeycloakAccessClaims {
   resource_access?: Record<string, { roles?: string[] }>;
   email?: string;
   email_verified?: boolean;
+  // Sourced from the `fullName` user attribute via the `fullName` protocol
+  // mapper on the `super-app-bff` client (oidc-usermodel-attribute-mapper,
+  // claim name `name`). Falls back to undefined for users created before
+  // the mapper / attribute was added.
+  name?: string;
   phone_number?: string;
   phone_number_verified?: boolean;
 }
@@ -201,13 +206,20 @@ export const createKeycloakJwtVerifier = (
 };
 
 /** Shape of the user-profile snapshot the BFF stores in Redis. Kept in
- *  sync with `SessionProfile` in `auth/stores/session.store.ts`. */
+ *  sync with `SessionProfile` in `auth/stores/session.store.ts`.
+ *  `*VerifiedAt` are populated by the verify-OTP handlers, never from
+ *  upstream tokens (KC has no protocol mapper for them — they're audit
+ *  data, not authorization data). */
 export interface VerifiedProfile {
   username?: string;
   email?: string;
   emailVerified: boolean;
+  emailVerifiedAt?: string;
+  fullName?: string;
   phoneNumber?: string;
   phoneNumberVerified: boolean;
+  phoneVerifiedAt?: string;
+  nikVerifiedAt?: string;
   roles: string[];
 }
 
@@ -244,12 +256,18 @@ export const verifyAndExtractProfile = async (
   const phoneNumber = acClaims?.phone_number ?? idClaims?.phone_number;
   const phoneNumberVerified =
     acClaims?.phone_number_verified ?? idClaims?.phone_number_verified ?? false;
+  // `name` claim is populated by the `fullName` protocol mapper on
+  // `super-app-bff` (see docs/realm-setup.md Step 3b). id_token carries
+  // it under the `profile` scope; access_token only when the mapper is
+  // configured to also emit there.
+  const fullName = idClaims?.name ?? acClaims?.name;
   return {
     sub,
     profile: {
       username: idClaims?.preferred_username,
       email: idClaims?.email ?? acClaims?.email,
       emailVerified,
+      fullName,
       phoneNumber,
       phoneNumberVerified,
       roles: acClaims?.realm_access?.roles ?? [],

@@ -84,7 +84,8 @@ export const makeVerifyPhoneOtpHandler = (deps: {
 
       await deps.otpStore.delete(key);
 
-      await deps.keycloakAdmin.setPhoneVerified(claims.sub, parsed.data.phone);
+      const verifiedAt = new Date().toISOString();
+      await deps.keycloakAdmin.setPhoneVerified(claims.sub, parsed.data.phone, verifiedAt);
 
       await deps.sessionStore.put(claims.sid, {
         ...session,
@@ -95,6 +96,7 @@ export const makeVerifyPhoneOtpHandler = (deps: {
           emailVerified: session.profile?.emailVerified ?? false,
           phoneNumber: parsed.data.phone,
           phoneNumberVerified: true,
+          phoneVerifiedAt: verifiedAt,
           roles: session.profile?.roles ?? [],
         },
         lastUsedAt: new Date().toISOString(),

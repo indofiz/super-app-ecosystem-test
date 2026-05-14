@@ -135,20 +135,20 @@ const buildFakeWa = (): FakeWa => {
 };
 
 interface FakeAdmin extends KeycloakAdminClient {
-  emailVerifiedCalls: string[];
-  phoneVerifiedCalls: Array<{ sub: string; phone: string }>;
+  emailVerifiedCalls: Array<{ sub: string; verifiedAt: string }>;
+  phoneVerifiedCalls: Array<{ sub: string; phone: string; verifiedAt: string }>;
 }
 const buildFakeAdmin = (): FakeAdmin => {
-  const emailVerifiedCalls: string[] = [];
+  const emailVerifiedCalls: FakeAdmin['emailVerifiedCalls'] = [];
   const phoneVerifiedCalls: FakeAdmin['phoneVerifiedCalls'] = [];
   return {
     emailVerifiedCalls,
     phoneVerifiedCalls,
-    async setEmailVerified(sub) {
-      emailVerifiedCalls.push(sub);
+    async setEmailVerified(sub, verifiedAt) {
+      emailVerifiedCalls.push({ sub, verifiedAt });
     },
-    async setPhoneVerified(sub, phone) {
-      phoneVerifiedCalls.push({ sub, phone });
+    async setPhoneVerified(sub, phone, verifiedAt) {
+      phoneVerifiedCalls.push({ sub, phone, verifiedAt });
     },
   };
 };
@@ -299,8 +299,12 @@ describe('email OTP — POST /auth/email/{send,verify}-otp', () => {
 
     // New JWT carries email_verified=true.
     expect(claims(verifyRes.body.access_token).email_verified).toBe(true);
-    // Admin API was called for the right user.
-    expect(h.keycloakAdmin.emailVerifiedCalls).toEqual(['user-123']);
+    // Admin API was called for the right user with an ISO timestamp.
+    expect(h.keycloakAdmin.emailVerifiedCalls).toHaveLength(1);
+    expect(h.keycloakAdmin.emailVerifiedCalls[0]!.sub).toBe('user-123');
+    expect(h.keycloakAdmin.emailVerifiedCalls[0]!.verifiedAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+    );
   });
 
   it('wrong code: 422 with attempts_left in detail; record still alive', async () => {
@@ -409,9 +413,12 @@ describe('phone OTP — POST /auth/phone/{send,verify}-otp', () => {
     expect(verifyRes.body.verified).toBe(true);
     expect(claims(verifyRes.body.access_token).phone_number_verified).toBe(true);
     expect(claims(verifyRes.body.access_token).phone_number).toBe('+6281234567890');
-    expect(h.keycloakAdmin.phoneVerifiedCalls).toEqual([
-      { sub: 'user-123', phone: '+6281234567890' },
-    ]);
+    expect(h.keycloakAdmin.phoneVerifiedCalls).toHaveLength(1);
+    expect(h.keycloakAdmin.phoneVerifiedCalls[0]!.sub).toBe('user-123');
+    expect(h.keycloakAdmin.phoneVerifiedCalls[0]!.phone).toBe('+6281234567890');
+    expect(h.keycloakAdmin.phoneVerifiedCalls[0]!.verifiedAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+    );
   });
 
   it('phone binding: verifying against a different number than was issued is rejected (410)', async () => {
