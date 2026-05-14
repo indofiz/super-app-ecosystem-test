@@ -13,7 +13,10 @@ WORKDIR /app
 #   - --enable-source-maps decodes stack traces against the emitted .map files.
 #   - HEALTHCHECK gives the orchestrator a built-in liveness signal.
 #   - Read-only app tree narrows the blast radius of any RCE.
-RUN apk add --no-cache tini wget && addgroup -S app && adduser -S app -G app
+RUN apk upgrade --no-cache && \
+    apk add --no-cache tini wget && \
+    addgroup -S app && adduser -S app -G app && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 ENV NODE_ENV=production \
     NODE_OPTIONS=--enable-source-maps
 COPY --from=build /app/node_modules ./node_modules
