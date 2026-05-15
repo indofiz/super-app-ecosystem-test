@@ -22,7 +22,8 @@ class ChannelState extends Equatable {
     this.status = ChannelStatus.idle,
     this.phoneNumber,
     this.expiresAt,
-    this.errorMessage,
+    this.errorCode,
+    this.attemptsLeft,
   });
 
   final ChannelStatus status;
@@ -34,7 +35,13 @@ class ChannelState extends Equatable {
   /// the resend-timer countdown.
   final DateTime? expiresAt;
 
-  final String? errorMessage;
+  /// Typed error from the last verification action, or null if none.
+  /// Presentation layer maps this to a localized string.
+  final VerificationErrorCode? errorCode;
+
+  /// Server-reported attempts remaining for [VerificationErrorCode.otpInvalid].
+  /// Null when [errorCode] doesn't carry attempts.
+  final int? attemptsLeft;
 
   /// `copyWith` uses zero-arg-returning closures so callers can
   /// distinguish "leave alone" from "clear to null".
@@ -42,14 +49,16 @@ class ChannelState extends Equatable {
     ChannelStatus? status,
     String? Function()? phoneNumber,
     DateTime? Function()? expiresAt,
-    String? Function()? errorMessage,
+    VerificationErrorCode? Function()? errorCode,
+    int? Function()? attemptsLeft,
   }) {
     return ChannelState(
       status: status ?? this.status,
       phoneNumber: phoneNumber != null ? phoneNumber() : this.phoneNumber,
       expiresAt: expiresAt != null ? expiresAt() : this.expiresAt,
-      errorMessage:
-          errorMessage != null ? errorMessage() : this.errorMessage,
+      errorCode: errorCode != null ? errorCode() : this.errorCode,
+      attemptsLeft:
+          attemptsLeft != null ? attemptsLeft() : this.attemptsLeft,
     );
   }
 
@@ -57,7 +66,8 @@ class ChannelState extends Equatable {
       status == ChannelStatus.sending || status == ChannelStatus.verifying;
 
   @override
-  List<Object?> get props => [status, phoneNumber, expiresAt, errorMessage];
+  List<Object?> get props =>
+      [status, phoneNumber, expiresAt, errorCode, attemptsLeft];
 }
 
 class VerificationState extends Equatable {

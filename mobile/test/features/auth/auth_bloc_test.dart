@@ -52,12 +52,21 @@ void main() {
 
     blocTest<AuthBloc, AuthState>(
       'emits authenticated when a valid session is restored',
+      // Mirror the real repo: restoreSession() emits on `sessionChanges`
+      // whenever it finds a stored session. The bloc reaches
+      // `authenticated` via the stream, not via an explicit handler emit.
       build: () {
         final s = validSession();
-        when(repo.restoreSession).thenAnswer((_) async => s);
+        when(repo.restoreSession).thenAnswer((_) async {
+          sessionController.add(s);
+          return s;
+        });
         return AuthBloc(authRepository: repo);
       },
-      act: (bloc) => bloc.add(const AuthStarted()),
+      act: (bloc) async {
+        bloc.add(const AuthStarted());
+        await Future<void>.delayed(Duration.zero);
+      },
       verify: (bloc) {
         expect(bloc.state.status, AuthStatus.authenticated);
         expect(bloc.state.session, isNotNull);
@@ -66,12 +75,25 @@ void main() {
 
     blocTest<AuthBloc, AuthState>(
       'emits unauthenticated when the restored session is expired',
+      // Real repo emits the expired session too; bloc downgrades to
+      // unauthenticated based on the `isExpired` check, then the stream
+      // emission for the same session is a no-op because the bloc state
+      // already shows unauthenticated.
       build: () {
-        when(repo.restoreSession).thenAnswer((_) async => expiredSession());
+        final s = expiredSession();
+        when(repo.restoreSession).thenAnswer((_) async {
+          sessionController.add(s);
+          return s;
+        });
         return AuthBloc(authRepository: repo);
       },
-      act: (bloc) => bloc.add(const AuthStarted()),
-      expect: () => [const AuthState.unauthenticated()],
+      act: (bloc) async {
+        bloc.add(const AuthStarted());
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (bloc) {
+        expect(bloc.state.status, AuthStatus.unauthenticated);
+      },
     );
   });
 
@@ -79,25 +101,36 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits authenticating then authenticated on success',
       build: () {
-        when(repo.login).thenAnswer((_) async => validSession());
+        when(repo.login).thenAnswer((_) async {
+          final s = validSession();
+          sessionController.add(s);
+          return s;
+        });
         return AuthBloc(authRepository: repo);
       },
-      act: (bloc) => bloc.add(const AuthLoginRequested()),
+      act: (bloc) async {
+        bloc.add(const AuthLoginRequested());
+        await Future<void>.delayed(Duration.zero);
+      },
       verify: (bloc) {
         expect(bloc.state.status, AuthStatus.authenticated);
       },
     );
 
     blocTest<AuthBloc, AuthState>(
-      'emits authenticating then unauthenticated with error on AuthFailure',
+      'emits authenticating then unauthenticated with code on AuthFailure',
       build: () {
-        when(repo.login).thenThrow(AuthFailure('nope'));
+        when(repo.login).thenThrow(
+          AuthFailure(code: AuthErrorCode.loginPlatformError),
+        );
         return AuthBloc(authRepository: repo);
       },
       act: (bloc) => bloc.add(const AuthLoginRequested()),
       expect: () => [
         const AuthState.authenticating(),
-        const AuthState.unauthenticated(errorMessage: 'nope'),
+        const AuthState.unauthenticated(
+          errorCode: AuthErrorCode.loginPlatformError,
+        ),
       ],
     );
   });
@@ -106,37 +139,81 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits authenticated with new session on success',
       build: () {
-        when(repo.refresh).thenAnswer((_) async => validSession());
+        when(repo.refresh).thenAnswer((_) async {
+          final s = validSession();
+          sessionController.add(s);
+          return s;
+        });
         return AuthBloc(authRepository: repo);
       },
-      act: (bloc) => bloc.add(const AuthRefreshRequested()),
+      act: (bloc) async {
+        bloc.add(const AuthRefreshRequested());
+        await Future<void>.delayed(Duration.zero);
+      },
       verify: (bloc) {
         expect(bloc.state.status, AuthStatus.authenticated);
       },
     );
 
     blocTest<AuthBloc, AuthState>(
-      'emits unauthenticated with message when refresh fails',
+      'emits unauthenticated with code when refresh fails',
       build: () {
-        when(repo.refresh).thenThrow(AuthFailure('refresh dead'));
+        when(repo.refresh).thenThrow(
+          AuthFailure(code: AuthErrorCode.refreshFailed),
+        );
         return AuthBloc(authRepository: repo);
       },
       act: (bloc) => bloc.add(const AuthRefreshRequested()),
       expect: () => [
-        const AuthState.unauthenticated(errorMessage: 'refresh dead'),
+        const AuthState.unauthenticated(
+          errorCode: AuthErrorCode.refreshFailed,
+        ),
       ],
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'refresh-401 path: stream null emission does not clobber the error code',
+      // The real BFF refresh-401 path emits null on the stream AND throws.
+      // The handler's explicit `unauthenticated(errorCode: ...)` must survive
+      // the subsequent `_AuthSessionChanged(null)` event.
+      build: () {
+        when(repo.refresh).thenAnswer((_) async {
+          sessionController.add(null);
+          throw AuthFailure(code: AuthErrorCode.sessionExpired);
+        });
+        return AuthBloc(authRepository: repo);
+      },
+      act: (bloc) async {
+        bloc.add(const AuthRefreshRequested());
+        // Let the stream-emitted _AuthSessionChanged process too.
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (bloc) {
+        expect(bloc.state.status, AuthStatus.unauthenticated);
+        expect(bloc.state.errorCode, AuthErrorCode.sessionExpired);
+      },
     );
   });
 
   group('AuthLogoutRequested', () {
     blocTest<AuthBloc, AuthState>(
       'emits unauthenticated after logout',
+      // Logout emits null on the stream; the bloc reaches unauthenticated
+      // via _onSessionChanged, not via an explicit handler emit.
       build: () {
-        when(() => repo.logout()).thenAnswer((_) async {});
+        when(() => repo.logout()).thenAnswer((_) async {
+          sessionController.add(null);
+        });
         return AuthBloc(authRepository: repo);
       },
-      act: (bloc) => bloc.add(const AuthLogoutRequested()),
-      expect: () => [const AuthState.unauthenticated()],
+      act: (bloc) async {
+        bloc.add(const AuthLogoutRequested());
+        await Future<void>.delayed(Duration.zero);
+      },
+      verify: (bloc) {
+        expect(bloc.state.status, AuthStatus.unauthenticated);
+        expect(bloc.state.errorCode, isNull);
+      },
     );
   });
 
@@ -154,8 +231,9 @@ void main() {
     );
 
     blocTest<AuthBloc, AuthState>(
-      'emits unauthenticated when repo broadcasts null',
+      'emits unauthenticated when repo broadcasts null from authenticated',
       build: () => AuthBloc(authRepository: repo),
+      seed: () => AuthState.authenticated(validSession()),
       act: (_) async {
         sessionController.add(null);
         await Future<void>.delayed(Duration.zero);

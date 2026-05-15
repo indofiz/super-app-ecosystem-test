@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_app_test/features/auth/domain/auth_session.dart';
 import 'package:smart_app_test/features/auth/presentation/bloc/auth_bloc.dart';
 import 'package:smart_app_test/features/verification/presentation/bloc/verification_bloc.dart';
+import 'package:smart_app_test/l10n/app_localizations.dart';
 
 class MockAuthBloc extends MockBloc<AuthEvent, AuthState>
     implements AuthBloc {}
@@ -48,6 +49,9 @@ Future<void> pumpScreen(
         BlocProvider<VerificationBloc>.value(value: verificationBloc),
       ],
       child: MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('id'),
         home: Builder(
           builder: (ctx) => Scaffold(
             body: Center(

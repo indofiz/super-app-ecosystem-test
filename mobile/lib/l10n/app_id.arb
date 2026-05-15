@@ -1,0 +1,65 @@
+{
+  "@@locale": "id",
+
+  "authSessionExpired": "Sesi berakhir. Silakan masuk kembali.",
+  "@authSessionExpired": { "description": "AuthErrorCode.sessionExpired" },
+
+  "authLoginCancelled": "Login dibatalkan.",
+  "@authLoginCancelled": { "description": "AuthErrorCode.loginCancelled" },
+
+  "authLoginTimedOut": "Waktu login habis. Silakan coba lagi.",
+  "@authLoginTimedOut": { "description": "AuthErrorCode.loginTimedOut" },
+
+  "authLoginPlatformError": "Login gagal. Silakan coba lagi.",
+  "@authLoginPlatformError": { "description": "AuthErrorCode.loginPlatformError" },
+
+  "authLoginMissingFields": "Server tidak mengirim data login yang lengkap.",
+  "@authLoginMissingFields": { "description": "AuthErrorCode.loginMissingFields" },
+
+  "authNotAuthenticated": "Anda belum masuk.",
+  "@authNotAuthenticated": { "description": "AuthErrorCode.notAuthenticated" },
+
+  "authRefreshFailed": "Gagal memperbarui sesi.",
+  "@authRefreshFailed": { "description": "AuthErrorCode.refreshFailed" },
+
+  "authNetwork": "Tidak dapat terhubung. Periksa koneksi internet Anda.",
+  "@authNetwork": { "description": "AuthErrorCode.network" },
+
+  "authUnknown": "Terjadi kesalahan tak terduga.",
+  "@authUnknown": { "description": "AuthErrorCode.unknown" },
+
+  "verifySendOtpFailed": "Gagal mengirim kode OTP.",
+  "@verifySendOtpFailed": { "description": "VerificationErrorCode.sendOtpFailed" },
+
+  "verifyVerifyOtpFailed": "Verifikasi gagal.",
+  "@verifyVerifyOtpFailed": { "description": "VerificationErrorCode.verifyOtpFailed" },
+
+  "verifyOtpInvalidWithAttempts": "Kode salah. Sisa percobaan: {attempts}.",
+  "@verifyOtpInvalidWithAttempts": {
+    "description": "Wrong OTP, still has attempts left",
+    "placeholders": {
+      "attempts": { "type": "int", "example": "3" }
+    }
+  },
+
+  "verifyOtpInvalid": "Kode salah.",
+  "@verifyOtpInvalid": { "description": "Wrong OTP, attemptsLeft unknown" },
+
+  "verifyOtpExhausted": "Percobaan habis. Silakan kirim ulang kode.",
+  "@verifyOtpExhausted": { "description": "VerificationErrorCode.otpExhausted" },
+
+  "verifyOtpExpired": "Kode kedaluwarsa. Silakan kirim ulang.",
+  "@verifyOtpExpired": { "description": "VerificationErrorCode.otpExpired" },
+
+  "verifyNotAuthenticated": "Anda belum masuk.",
+  "@verifyNotAuthenticated": { "description": "VerificationErrorCode.notAuthenticated" },
+
+  "verifyPhoneNotEntered": "Nomor WhatsApp belum dimasukkan.",
+  "@verifyPhoneNotEntered": { "description": "VerificationErrorCode.phoneNotEntered" },
+
+  "verifyNetwork": "Tidak dapat terhubung. Periksa koneksi internet Anda.",
+  "@verifyNetwork": { "description": "VerificationErrorCode.network" },
+
+  "verifyUnknown": "Terjadi kesalahan tak terduga.",
+  "@verifyUnknown": { "description": "VerificationErrorCode.unknown" }
+}

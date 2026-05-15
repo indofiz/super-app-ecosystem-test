@@ -1,0 +1,29 @@
+{
+  "@@locale": "en",
+
+  "authSessionExpired": "Your session has expired. Please sign in again.",
+  "authLoginCancelled": "Login was cancelled.",
+  "authLoginTimedOut": "Login timed out. Please try again.",
+  "authLoginPlatformError": "Login failed. Please try again.",
+  "authLoginMissingFields": "The server did not return a complete login response.",
+  "authNotAuthenticated": "You are not signed in.",
+  "authRefreshFailed": "Could not refresh your session.",
+  "authNetwork": "Could not connect. Check your internet connection.",
+  "authUnknown": "An unexpected error occurred.",
+
+  "verifySendOtpFailed": "Could not send the OTP code.",
+  "verifyVerifyOtpFailed": "Verification failed.",
+  "verifyOtpInvalidWithAttempts": "Wrong code. {attempts} attempts left.",
+  "@verifyOtpInvalidWithAttempts": {
+    "placeholders": {
+      "attempts": { "type": "int" }
+    }
+  },
+  "verifyOtpInvalid": "Wrong code.",
+  "verifyOtpExhausted": "No attempts left. Please request a new code.",
+  "verifyOtpExpired": "The code has expired. Please request a new one.",
+  "verifyNotAuthenticated": "You are not signed in.",
+  "verifyPhoneNotEntered": "Please enter your WhatsApp number first.",
+  "verifyNetwork": "Could not connect. Check your internet connection.",
+  "verifyUnknown": "An unexpected error occurred."
+}

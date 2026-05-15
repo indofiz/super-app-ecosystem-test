@@ -4,13 +4,16 @@ import 'package:dio/dio.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/config/auth_timings.dart';
 import '../../../core/logging/auth_log.dart';
+import '../../../core/network/bff_error.dart';
 import '../../../core/storage/secure_store.dart';
+import '../domain/auth_error_code.dart';
 import '../domain/auth_repository.dart';
 import '../domain/auth_session.dart';
 import 'bff_auth_api.dart';
 
-void _log(String msg) => authLog('repo', msg);
+final _log = authLogger('repo');
 
 /// Real BFF-mediated auth repository.
 ///
@@ -29,31 +32,21 @@ class BffAuthRepository implements AuthRepository {
     FlutterAppAuth? appAuth,
     BffAuthApi? api,
   })  : _appAuth = appAuth ?? const FlutterAppAuth(),
+        _ownsApi = api == null,
         _api = api ?? BffAuthApi(config: config);
 
   final AppConfig config;
   final SecureStore secureStore;
   final FlutterAppAuth _appAuth;
   final BffAuthApi _api;
+  // True when this repo constructed its own [BffAuthApi] and therefore owns
+  // its lifecycle. When injected (tests), the caller disposes it.
+  final bool _ownsApi;
 
   final _controller = StreamController<AuthSession?>.broadcast();
 
   @override
   Stream<AuthSession?> get sessionChanges => _controller.stream;
-
-  AuthSession _toSession({
-    required String accessToken,
-    required String sessionId,
-    required DateTime expiresAt,
-  }) =>
-      // `fromToken` decodes the JWT payload and seeds emailVerified /
-      // phoneNumberVerified from the BFF-signed claims. Avoids a /auth/me
-      // round-trip after every refresh just to read the flags.
-      AuthSession.fromToken(
-        accessToken: accessToken,
-        sessionId: sessionId,
-        expiresAt: expiresAt,
-      );
 
   @override
   Future<AuthSession?> restoreSession() async {
@@ -65,21 +58,10 @@ class BffAuthRepository implements AuthRepository {
     }
     _log(
         'restoreSession: found session, sid=${stored.sessionId.substring(0, 6)}…, expiresAt=${stored.expiresAt.toIso8601String()}');
-    final session = _toSession(
-      accessToken: stored.accessToken,
-      sessionId: stored.sessionId,
-      expiresAt: stored.expiresAt,
-    );
+    final session = AuthSession.fromStored(stored);
     _controller.add(session);
     return session;
   }
-
-  /// Hard cap on the AppAuth round-trip. If Android kills the app's task while
-  /// the Custom Tab is open, AppAuth's `AuthorizationManagementActivity` loses
-  /// its in-memory state and logs `No stored state - unable to handle response`,
-  /// then `finish()`s without ever completing the Future. Without this timeout
-  /// the bloc would sit in `authenticating` forever.
-  static const _loginTimeout = Duration(minutes: 3);
 
   @override
   Future<AuthSession> login() async {
@@ -92,7 +74,7 @@ class BffAuthRepository implements AuthRepository {
     _log('login: allowInsecure=${config.allowInsecureConnections}');
     final stopwatch = Stopwatch()..start();
     try {
-      _log('login: calling authorizeAndExchangeCode (timeout=${_loginTimeout.inSeconds}s)');
+      _log('login: calling authorizeAndExchangeCode (timeout=${kOauthLoginTimeout.inSeconds}s)');
       final result = await _appAuth
           .authorizeAndExchangeCode(
             AuthorizationTokenRequest(
@@ -107,7 +89,7 @@ class BffAuthRepository implements AuthRepository {
               promptValues: const ['login'],
             ),
           )
-          .timeout(_loginTimeout);
+          .timeout(kOauthLoginTimeout);
       _log('login: AppAuth returned in ${stopwatch.elapsedMilliseconds}ms');
       _log('login: accessToken? ${result.accessToken != null} (len=${result.accessToken?.length ?? 0})');
       _log('login: idToken? ${result.idToken != null}');
@@ -125,31 +107,31 @@ class BffAuthRepository implements AuthRepository {
       if (accessToken == null || expiresAt == null || sessionId == null) {
         _log('login: FAIL — missing required fields (accessToken=${accessToken != null}, expiresAt=${expiresAt != null}, sessionId=${sessionId != null})');
         throw AuthFailure(
-          'BFF response missing required fields (access_token / expires_in / session_id).',
+          code: AuthErrorCode.loginMissingFields,
+          diagnostic:
+              'access_token=${accessToken != null} expires_in=${expiresAt != null} session_id=${sessionId != null}',
         );
       }
 
       // Note: result.idToken is null with the new BFF — we store null here and
-      // fetch profile via /auth/me when needed.
-      final session = _toSession(
+      // fetch profile via /auth/me when needed. `fromToken` decodes the JWT
+      // payload and seeds emailVerified / phoneNumberVerified from the
+      // BFF-signed claims — avoids a /auth/me round-trip after every refresh.
+      final session = AuthSession.fromToken(
         accessToken: accessToken,
         sessionId: sessionId,
         expiresAt: expiresAt,
       );
 
       _log('login: writing session to secure storage');
-      await secureStore.writeSession(
-        accessToken: session.accessToken,
-        sessionId: session.sessionId,
-        expiresAt: session.expiresAt,
-      );
+      await secureStore.writeSession(session.toStored());
       _log('login: SUCCESS in ${stopwatch.elapsedMilliseconds}ms');
       _controller.add(session);
       return session;
     } on TimeoutException catch (e) {
       _log('login: TIMEOUT after ${stopwatch.elapsedMilliseconds}ms — AppAuth never returned (likely Android killed the task while Custom Tab was open)');
       throw AuthFailure(
-        'Login timed out — please try again.',
+        code: AuthErrorCode.loginTimedOut,
         cause: e,
         retryable: true,
       );
@@ -157,23 +139,29 @@ class BffAuthRepository implements AuthRepository {
       _log('login: CANCELLED after ${stopwatch.elapsedMilliseconds}ms — code=${e.code} msg=${e.message}');
       // "User cancelled" can also fire when AppAuth fails to discover a
       // browser, when the Custom Tabs intent fails to launch, or when a
-      // launchMode mismatch loses the redirect callback. Surface the code
-      // and message so we can tell which.
+      // launchMode mismatch loses the redirect callback. The diagnostic
+      // captures both so logs can tell which.
       throw AuthFailure(
-        'Login cancelled (code=${e.code} msg=${e.message})',
+        code: AuthErrorCode.loginCancelled,
+        diagnostic: 'code=${e.code} msg=${e.message}',
         cause: e,
         retryable: true,
       );
     } on FlutterAppAuthPlatformException catch (e) {
       _log('login: PLATFORM ERROR after ${stopwatch.elapsedMilliseconds}ms — code=${e.code} msg=${e.message}');
       throw AuthFailure(
-        'Login failed (code=${e.code} msg=${e.message})',
+        code: AuthErrorCode.loginPlatformError,
+        diagnostic: 'code=${e.code} msg=${e.message}',
         cause: e,
       );
     } catch (e, st) {
       _log('login: UNEXPECTED ERROR after ${stopwatch.elapsedMilliseconds}ms — $e');
       _log('login: stack=$st');
-      throw AuthFailure('Login failed: $e', cause: e);
+      throw AuthFailure(
+        code: AuthErrorCode.unknown,
+        diagnostic: '$e',
+        cause: e,
+      );
     }
   }
 
@@ -181,26 +169,44 @@ class BffAuthRepository implements AuthRepository {
   Future<AuthSession> refresh() async {
     final stored = await secureStore.readSession();
     if (stored == null) {
-      throw AuthFailure('No session to refresh.');
+      throw AuthFailure(code: AuthErrorCode.notAuthenticated);
     }
     // BFF requires the bearer (§2.1). Even an expired access_token works
     // — the BFF accepts up to 24h past expiry on /refresh.
-    final res = await _api.refresh(
-      sessionId: stored.sessionId,
-      bearer: stored.accessToken,
-    );
-    final session = _toSession(
-      accessToken: res.accessToken,
-      sessionId: res.sessionId,
-      expiresAt: DateTime.now().add(Duration(seconds: res.expiresIn)),
-    );
-    await secureStore.writeSession(
-      accessToken: session.accessToken,
-      sessionId: session.sessionId,
-      expiresAt: session.expiresAt,
-    );
-    _controller.add(session);
-    return session;
+    try {
+      final res = await _api.refresh(
+        sessionId: stored.sessionId,
+        bearer: stored.accessToken,
+      );
+      final session = AuthSession.fromToken(
+        accessToken: res.accessToken,
+        sessionId: res.sessionId,
+        expiresAt: DateTime.now().add(Duration(seconds: res.expiresIn)),
+      );
+      await secureStore.writeSession(session.toStored());
+      _controller.add(session);
+      return session;
+    } on DioException catch (e) {
+      // The BFF says the server-side session is gone (Redis wiped, BFF
+      // restarted, or session explicitly invalidated). Local credentials
+      // are now useless — wipe them and emit null so the bloc reaches
+      // unauthenticated. Otherwise the user lingers in a half-authed
+      // state where every subsequent call also 401s.
+      final status = e.response?.statusCode;
+      final body = e.response?.data;
+      final isInvalidSession = status == 401 ||
+          (body is Map && body['error'] == 'invalid_session');
+      if (isInvalidSession) {
+        _log('refresh: session gone server-side → clearing local state');
+        await secureStore.clear();
+        _controller.add(null);
+        throw AuthFailure(
+          code: AuthErrorCode.sessionExpired,
+          cause: e,
+        );
+      }
+      throw _mapDio(e, fallback: AuthErrorCode.refreshFailed);
+    }
   }
 
   @override
@@ -224,7 +230,7 @@ class BffAuthRepository implements AuthRepository {
   Future<UserProfile> getProfile() async {
     final stored = await secureStore.readSession();
     if (stored == null) {
-      throw AuthFailure('Not authenticated');
+      throw AuthFailure(code: AuthErrorCode.notAuthenticated);
     }
     final body = await _api.getMe(stored.accessToken);
     final roles = (body['roles'] as List?)?.cast<String>() ?? const [];
@@ -244,114 +250,28 @@ class BffAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<Duration> sendEmailOtp() async {
-    final stored = await secureStore.readSession();
-    if (stored == null) throw AuthFailure('Not authenticated');
-    try {
-      final res = await _api.sendEmailOtp(stored.accessToken);
-      _log('sendEmailOtp: delivery=${res.delivery} '
-          'alreadyVerified=${res.alreadyVerified}');
-      return Duration(seconds: res.expiresIn);
-    } on DioException catch (e) {
-      throw _mapDio(e, fallback: 'Gagal mengirim OTP email.');
-    }
+  Future<void> replaceSession(AuthSession session) async {
+    await secureStore.writeSession(session.toStored());
+    _controller.add(session);
   }
 
   @override
-  Future<AuthSession> verifyEmailOtp(String code) async {
-    final stored = await secureStore.readSession();
-    if (stored == null) throw AuthFailure('Not authenticated');
-    try {
-      final res = await _api.verifyEmailOtp(stored.accessToken, code);
-      final session = _toSession(
-        accessToken: res.accessToken,
-        sessionId: res.sessionId,
-        expiresAt: DateTime.now().add(Duration(seconds: res.expiresIn)),
-      );
-      await secureStore.writeSession(
-        accessToken: session.accessToken,
-        sessionId: session.sessionId,
-        expiresAt: session.expiresAt,
-      );
-      _controller.add(session);
-      _log('verifyEmailOtp: SUCCESS');
-      return session;
-    } on DioException catch (e) {
-      throw _mapVerifyDio(e);
-    }
+  Future<void> dispose() async {
+    if (_ownsApi) await _api.dispose();
+    await _controller.close();
   }
 
-  @override
-  Future<Duration> sendPhoneOtp(String phone) async {
-    final stored = await secureStore.readSession();
-    if (stored == null) throw AuthFailure('Not authenticated');
-    try {
-      final res = await _api.sendPhoneOtp(stored.accessToken, phone);
-      _log('sendPhoneOtp: delivery=${res.delivery} '
-          'alreadyVerified=${res.alreadyVerified}');
-      return Duration(seconds: res.expiresIn);
-    } on DioException catch (e) {
-      throw _mapDio(e, fallback: 'Gagal mengirim OTP WhatsApp.');
-    }
-  }
-
-  @override
-  Future<AuthSession> verifyPhoneOtp(String phone, String code) async {
-    final stored = await secureStore.readSession();
-    if (stored == null) throw AuthFailure('Not authenticated');
-    try {
-      final res = await _api.verifyPhoneOtp(stored.accessToken, phone, code);
-      final session = _toSession(
-        accessToken: res.accessToken,
-        sessionId: res.sessionId,
-        expiresAt: DateTime.now().add(Duration(seconds: res.expiresIn)),
-      );
-      await secureStore.writeSession(
-        accessToken: session.accessToken,
-        sessionId: session.sessionId,
-        expiresAt: session.expiresAt,
-      );
-      _controller.add(session);
-      _log('verifyPhoneOtp: SUCCESS');
-      return session;
-    } on DioException catch (e) {
-      throw _mapVerifyDio(e);
-    }
-  }
-
-  /// Map a Dio error from a verify-OTP call into the typed failures the
-  /// bloc expects. The BFF's error vocabulary:
-  ///   - 410 otp_expired / otp_exhausted → OtpExpiredFailure
-  ///   - 422 otp_invalid (with attempts_left) → OtpInvalidFailure
-  ///   - everything else → generic AuthFailure
-  AuthFailure _mapVerifyDio(DioException e) {
-    final status = e.response?.statusCode;
-    final body = e.response?.data;
-    if (status == 410) {
-      return OtpExpiredFailure(cause: e);
-    }
-    if (status == 422 && body is Map) {
-      // BFF puts `attempts_left` inside the HttpError detail. The error
-      // middleware projects it as `{error, error_description, detail}`.
-      final detail = body['detail'];
-      final attemptsLeft = detail is Map && detail['attempts_left'] is num
-          ? (detail['attempts_left'] as num).toInt()
-          : 0;
-      return OtpInvalidFailure(attemptsLeft: attemptsLeft, cause: e);
-    }
-    return _mapDio(e, fallback: 'Verifikasi gagal.');
-  }
-
-  AuthFailure _mapDio(DioException e, {required String fallback}) {
-    final body = e.response?.data;
-    String? desc;
-    if (body is Map && body['error_description'] is String) {
-      desc = body['error_description'] as String;
-    }
-    final retryable =
-        e.type == DioExceptionType.connectionTimeout ||
-            e.type == DioExceptionType.receiveTimeout ||
-            e.type == DioExceptionType.sendTimeout;
-    return AuthFailure(desc ?? fallback, cause: e, retryable: retryable);
+  /// Map a Dio error into a typed [AuthFailure]. [fallback] is the code
+  /// assigned when this isn't a network-level timeout. The BFF's
+  /// `error_description` is captured as a diagnostic for logs — it is
+  /// never shown to the user.
+  AuthFailure _mapDio(DioException e, {required AuthErrorCode fallback}) {
+    final info = describeBffError(e);
+    return AuthFailure(
+      code: info.isTimeout ? AuthErrorCode.network : fallback,
+      diagnostic: info.errorDescription,
+      cause: e,
+      retryable: info.isTimeout,
+    );
   }
 }

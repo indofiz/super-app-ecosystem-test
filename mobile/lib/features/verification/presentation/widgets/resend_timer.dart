@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/config/auth_timings.dart';
+
 /// "Kirim ulang dalam 0:42" / "Kirim ulang kode" toggle.
 ///
 /// Counts down toward [expiresAt] (or a fixed [resendCooldown] from now
@@ -11,7 +13,7 @@ class ResendTimer extends StatefulWidget {
   const ResendTimer({
     super.key,
     this.expiresAt,
-    this.resendCooldown = const Duration(seconds: 60),
+    this.resendCooldown = kOtpResendCooldown,
     required this.onResend,
     this.enabled = true,
   });

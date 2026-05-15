@@ -1,10 +1,11 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 
 import '../config/app_config.dart';
 import '../logging/auth_log.dart';
+import '../network/dio_factory.dart';
+import '../network/logging_interceptor.dart';
 import '../../features/auth/domain/auth_repository.dart';
 import '../../features/auth/domain/auth_session.dart';
 
@@ -35,12 +36,7 @@ class ApiClient {
     AuthSession? initialSession,
     Dio? dio,
   }) {
-    final client = dio ??
-        Dio(BaseOptions(
-          baseUrl: config.bffBaseUrl,
-          connectTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 15),
-        ));
+    final client = dio ?? createDio(config: config);
 
     final tokenHolder = _TokenHolder(initialSession);
     final sub = authRepository.sessionChanges.listen(tokenHolder.set);
@@ -51,23 +47,7 @@ class ApiClient {
       tokenHolder: tokenHolder,
       authRepository: authRepository,
     ));
-    if (kDebugMode) {
-      client.interceptors.add(InterceptorsWrapper(
-        onRequest: (o, h) {
-          authLog('http', '→ ${o.method} ${o.uri}');
-          h.next(o);
-        },
-        onResponse: (r, h) {
-          authLog('http', '← ${r.statusCode} ${r.requestOptions.uri}');
-          h.next(r);
-        },
-        onError: (e, h) {
-          authLog('http',
-              '✗ ${e.requestOptions.method} ${e.requestOptions.uri} — ${e.response?.statusCode} ${e.message}');
-          h.next(e);
-        },
-      ));
-    }
+    client.interceptors.add(httpLoggingInterceptor('http'));
     return ApiClient._(client, sub);
   }
 

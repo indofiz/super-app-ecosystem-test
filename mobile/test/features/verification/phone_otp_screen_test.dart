@@ -103,7 +103,8 @@ void main() {
     Future<void> mountCodeStep(
       WidgetTester tester, {
       String phone = '+6281234567890',
-      String? errorMessage,
+      VerificationErrorCode? errorCode,
+      int? attemptsLeft,
       ChannelStatus status = ChannelStatus.awaitingCode,
     }) =>
         mount(
@@ -113,7 +114,8 @@ void main() {
               status: status,
               phoneNumber: phone,
               expiresAt: DateTime.now().add(const Duration(minutes: 5)),
-              errorMessage: errorMessage,
+              errorCode: errorCode,
+              attemptsLeft: attemptsLeft,
             ),
           ),
         );
@@ -149,11 +151,12 @@ void main() {
       },
     );
 
-    testWidgets('error message is shown when state carries one',
+    testWidgets('localized error message is shown when state carries a code',
         (tester) async {
       await mountCodeStep(
         tester,
-        errorMessage: 'Kode salah. Sisa percobaan: 2.',
+        errorCode: VerificationErrorCode.otpInvalid,
+        attemptsLeft: 2,
       );
       expect(find.text('Kode salah. Sisa percobaan: 2.'), findsOneWidget);
     });

@@ -87,13 +87,15 @@ void main() {
     },
   );
 
-  testWidgets('shows error message when state carries one', (tester) async {
+  testWidgets('shows localized error message when state carries one',
+      (tester) async {
     await mount(
       tester,
       vState: const VerificationState(
         email: ChannelState(
           status: ChannelStatus.awaitingCode,
-          errorMessage: 'Kode salah. Sisa percobaan: 3.',
+          errorCode: VerificationErrorCode.otpInvalid,
+          attemptsLeft: 3,
         ),
       ),
     );

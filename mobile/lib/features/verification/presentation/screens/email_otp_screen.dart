@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../l10n/app_localizations.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../bloc/verification_bloc.dart';
+import '../verification_error_l10n.dart';
 import '../widgets/otp_input.dart';
 import '../widgets/resend_timer.dart';
 
@@ -17,7 +19,6 @@ class EmailOtpScreen extends StatefulWidget {
 }
 
 class _EmailOtpScreenState extends State<EmailOtpScreen> {
-  final _otpKey = GlobalKey<State>();
   String _code = '';
 
   @override
@@ -67,7 +68,6 @@ class _EmailOtpScreenState extends State<EmailOtpScreen> {
                 ),
                 const SizedBox(height: 32),
                 OtpInput(
-                  key: _otpKey,
                   enabled: !disabled,
                   onChanged: (v) => setState(() => _code = v),
                   onCompleted: (v) => context
@@ -75,11 +75,15 @@ class _EmailOtpScreenState extends State<EmailOtpScreen> {
                       .add(EmailVerifyOtpRequested(v)),
                 ),
                 const SizedBox(height: 16),
-                if (email.errorMessage != null)
+                if (email.errorCode != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
-                      email.errorMessage!,
+                      verificationErrorMessage(
+                        AppLocalizations.of(context),
+                        email.errorCode!,
+                        attemptsLeft: email.attemptsLeft,
+                      ),
                       style: TextStyle(color: theme.colorScheme.error),
                     ),
                   ),

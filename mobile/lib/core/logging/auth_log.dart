@@ -10,3 +10,9 @@ void authLog(String tag, String msg) {
   // ignore: avoid_print
   print('[AUTH/$tag] $msg');
 }
+
+/// Returns a closure that prefixes every message with [tag]. Lets each
+/// file keep `_log('foo')` ergonomics without redeclaring the same
+/// one-line helper.
+void Function(String msg) authLogger(String tag) =>
+    (msg) => authLog(tag, msg);

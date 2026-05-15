@@ -1,5 +1,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'stored_session.dart';
+
 /// Encrypted at-rest storage for the two things mobile is allowed to hold:
 /// the BFF-minted internal JWT (short-lived bearer) and the opaque
 /// session_id that the BFF uses to look up the Keycloak refresh_token in
@@ -20,30 +22,25 @@ class SecureStore {
 
   final FlutterSecureStorage _storage;
 
-  Future<void> writeSession({
-    required String accessToken,
-    required String sessionId,
-    required DateTime expiresAt,
-  }) async {
+  Future<void> writeSession(StoredSession session) async {
     await Future.wait([
-      _storage.write(key: _kAccessToken, value: accessToken),
-      _storage.write(key: _kSessionId, value: sessionId),
+      _storage.write(key: _kAccessToken, value: session.accessToken),
+      _storage.write(key: _kSessionId, value: session.sessionId),
       _storage.write(
         key: _kExpiresAt,
-        value: expiresAt.toUtc().toIso8601String(),
+        value: session.expiresAt.toUtc().toIso8601String(),
       ),
     ]);
   }
 
-  Future<({String accessToken, String sessionId, DateTime expiresAt})?>
-      readSession() async {
+  Future<StoredSession?> readSession() async {
     final accessToken = await _storage.read(key: _kAccessToken);
     final sessionId = await _storage.read(key: _kSessionId);
     final expiresAtRaw = await _storage.read(key: _kExpiresAt);
     if (accessToken == null || sessionId == null || expiresAtRaw == null) {
       return null;
     }
-    return (
+    return StoredSession(
       accessToken: accessToken,
       sessionId: sessionId,
       expiresAt: DateTime.parse(expiresAtRaw),

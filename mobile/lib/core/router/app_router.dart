@@ -1,11 +1,8 @@
-import 'dart:async';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/auth/domain/auth_repository.dart';
-import '../../features/auth/presentation/bloc/auth_bloc.dart';
+import '../../features/auth/domain/auth_status.dart';
+import '../../features/verification/domain/verification_repository.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/splash_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
@@ -13,13 +10,16 @@ import '../../features/verification/presentation/bloc/verification_bloc.dart';
 import '../../features/verification/presentation/screens/email_otp_screen.dart';
 import '../../features/verification/presentation/screens/phone_otp_screen.dart';
 import '../../features/verification/presentation/screens/verification_screen.dart';
+import 'auth_status_listenable.dart';
 
+/// Top-level router. Depends only on the framework-neutral
+/// [AuthStatusListenable] — swapping the auth state manager (e.g. to
+/// Riverpod or a pure Stream) requires no change to this file.
 class AppRouter {
-  AppRouter({required this.authBloc}) {
-    _refresh = _AuthBlocListenable(authBloc);
+  AppRouter({required this.status}) {
     config = GoRouter(
       initialLocation: '/splash',
-      refreshListenable: _refresh,
+      refreshListenable: status,
       redirect: _redirect,
       routes: [
         GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
@@ -34,7 +34,7 @@ class AppRouter {
         ShellRoute(
           builder: (context, state, child) => BlocProvider<VerificationBloc>(
             create: (ctx) => VerificationBloc(
-              authRepository: ctx.read<AuthRepository>(),
+              verificationRepository: ctx.read<VerificationRepository>(),
             ),
             child: child,
           ),
@@ -59,38 +59,22 @@ class AppRouter {
     );
   }
 
-  final AuthBloc authBloc;
-  late final _AuthBlocListenable _refresh;
+  final AuthStatusListenable status;
   late final GoRouter config;
 
   String? _redirect(_, GoRouterState state) {
-    final status = authBloc.state.status;
+    final s = status.status;
     final loc = state.matchedLocation;
 
-    if (status == AuthStatus.unknown) {
+    if (s == AuthStatus.unknown) {
       return loc == '/splash' ? null : '/splash';
     }
-    if (status == AuthStatus.authenticated) {
+    if (s == AuthStatus.authenticated) {
       if (loc == '/splash' || loc == '/login') return '/home';
       return null;
     }
     // unauthenticated / authenticating
     if (loc == '/splash' || loc == '/home') return '/login';
     return null;
-  }
-
-  void dispose() => _refresh.dispose();
-}
-
-class _AuthBlocListenable extends ChangeNotifier {
-  _AuthBlocListenable(AuthBloc bloc) {
-    _sub = bloc.stream.listen((_) => notifyListeners());
-  }
-  late final StreamSubscription _sub;
-
-  @override
-  void dispose() {
-    _sub.cancel();
-    super.dispose();
   }
 }

@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 
+import '../../../core/storage/stored_session.dart';
 import 'jwt_claims.dart';
 
 class AuthSession extends Equatable {
@@ -32,6 +33,22 @@ class AuthSession extends Equatable {
       phoneNumberVerified: claims.phoneNumberVerified,
     );
   }
+
+  /// Decode a raw [StoredSession] from `SecureStore.readSession()`. Same
+  /// JWT decode as [fromToken], just plumbed via the storage value type.
+  factory AuthSession.fromStored(StoredSession s) => AuthSession.fromToken(
+        accessToken: s.accessToken,
+        sessionId: s.sessionId,
+        expiresAt: s.expiresAt,
+      );
+
+  /// Project this session back into its raw three-field storage shape.
+  /// Drops the JWT-decoded fields — they're derived from `accessToken`.
+  StoredSession toStored() => StoredSession(
+        accessToken: accessToken,
+        sessionId: sessionId,
+        expiresAt: expiresAt,
+      );
 
   final String accessToken;
   final String sessionId;

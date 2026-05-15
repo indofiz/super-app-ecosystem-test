@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../l10n/app_localizations.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../bloc/verification_bloc.dart';
+import '../verification_error_l10n.dart';
 import '../widgets/otp_input.dart';
 import '../widgets/resend_timer.dart';
 
@@ -123,11 +125,15 @@ class _PhoneOtpScreenState extends State<PhoneOtpScreen> {
             },
           ),
           const SizedBox(height: 16),
-          if (phone.errorMessage != null)
+          if (phone.errorCode != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                phone.errorMessage!,
+                verificationErrorMessage(
+                  AppLocalizations.of(context),
+                  phone.errorCode!,
+                  attemptsLeft: phone.attemptsLeft,
+                ),
                 style: TextStyle(color: theme.colorScheme.error),
               ),
             ),
@@ -180,11 +186,15 @@ class _PhoneOtpScreenState extends State<PhoneOtpScreen> {
               .add(PhoneVerifyOtpRequested(v)),
         ),
         const SizedBox(height: 16),
-        if (phone.errorMessage != null)
+        if (phone.errorCode != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              phone.errorMessage!,
+              verificationErrorMessage(
+                AppLocalizations.of(context),
+                phone.errorCode!,
+                attemptsLeft: phone.attemptsLeft,
+              ),
               style: TextStyle(color: theme.colorScheme.error),
             ),
           ),

@@ -1,4 +1,5 @@
-import 'dart:convert';
+import '../../../core/jwt/jwt_codec.dart';
+import '../../../core/logging/auth_log.dart';
 
 /// Pure helper for reading the BFF-minted internal JWT.
 ///
@@ -31,29 +32,25 @@ class JwtClaims {
   /// validate signature, issuer, audience, or expiry — that's Kong's job.
   factory JwtClaims.fromToken(String jwt) {
     final parts = jwt.split('.');
-    if (parts.length < 2) return JwtClaims.empty();
-    try {
-      final segment = parts[1];
-      final padded = segment.padRight(
-        segment.length + (4 - segment.length % 4) % 4,
-        '=',
-      );
-      final decoded = utf8.decode(base64Url.decode(padded));
-      final raw = jsonDecode(decoded);
-      if (raw is! Map<String, dynamic>) return JwtClaims.empty();
-      return JwtClaims(
-        raw: raw,
-        email: raw['email'] as String?,
-        emailVerified: raw['email_verified'] == true,
-        phoneNumber: raw['phone_number'] as String?,
-        phoneNumberVerified: raw['phone_number_verified'] == true,
-        sub: raw['sub'] as String?,
-        username: raw['username'] as String? ??
-            raw['preferred_username'] as String?,
-      );
-    } catch (_) {
+    if (parts.length < 2) {
+      authLog('jwt', 'decode failed: token has <2 segments');
       return JwtClaims.empty();
     }
+    final raw = decodeJwtSegment(parts[1]);
+    if (raw == null) {
+      authLog('jwt', 'decode failed: payload was not a JSON object');
+      return JwtClaims.empty();
+    }
+    return JwtClaims(
+      raw: raw,
+      email: raw['email'] as String?,
+      emailVerified: raw['email_verified'] == true,
+      phoneNumber: raw['phone_number'] as String?,
+      phoneNumberVerified: raw['phone_number_verified'] == true,
+      sub: raw['sub'] as String?,
+      username: raw['username'] as String? ??
+          raw['preferred_username'] as String?,
+    );
   }
 
   final Map<String, dynamic> raw;

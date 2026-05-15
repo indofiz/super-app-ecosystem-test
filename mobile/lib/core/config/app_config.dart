@@ -11,6 +11,26 @@ class AppConfigException implements Exception {
   String toString() => 'AppConfigException: $message';
 }
 
+/// Application configuration sourced from `.env` (bundled as a Flutter
+/// asset) at startup.
+///
+/// SECURITY — `.env` USAGE RULES:
+/// 1. `.env` is bundled inside the APK/IPA. ANYONE who unpacks the
+///    binary can read every value. Treat it as **public data**.
+/// 2. Allowed contents: build-time defaults for non-secret routing
+///    (`BFF_BASE_URL`, `OAUTH_CLIENT_ID`, `OAUTH_REDIRECT_URI`,
+///    `USE_MOCK_AUTH`, `ALLOW_INSECURE_CONNECTIONS`).
+/// 3. DO NOT add secrets — no API keys, no client secrets, no signing
+///    keys, no tokens. Examples of values that must NEVER appear here:
+///    `FONNTE_API_KEY`, `KEYCLOAK_CLIENT_SECRET`, anything ending in
+///    `*_SECRET` or `*_KEY`. Those belong on the BFF, which mobile
+///    talks to via the bearer-mediated session.
+/// 4. For per-environment overrides at build time, prefer
+///    `--dart-define=X=Y` flags read with `String.fromEnvironment` —
+///    those are baked into the binary at compile time and don't ship
+///    as a readable asset.
+/// 5. Releasing with `USE_MOCK_AUTH=true` would silently auth every
+///    user as `mock-user-####`. Ship `false` in production builds.
 class AppConfig {
   const AppConfig({
     required this.bffBaseUrl,

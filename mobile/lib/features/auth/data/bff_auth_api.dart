@@ -1,10 +1,9 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 
 import '../../../core/config/app_config.dart';
-import '../../../core/logging/auth_log.dart';
-
-void _log(String msg) => authLog('api', msg);
+import '../../../core/config/auth_timings.dart';
+import '../../../core/network/dio_factory.dart';
+import '../../../core/network/logging_interceptor.dart';
 
 /// Thin HTTP client for the BFF auth endpoints.
 ///
@@ -22,36 +21,29 @@ void _log(String msg) => authLog('api', msg);
 ///                       -> 204
 ///   GET  /auth/me       hdr: `Authorization: Bearer ...`
 ///                       -> {sub, username, email, roles, expiresAt}
+///
+/// Deliberately does NOT use the workspace-shared `ApiClient` (which
+/// auto-attaches a bearer and retries on 401). `/auth/refresh` running
+/// through a 401-retry loop would recurse forever, so this stack stays
+/// minimal: shared timeouts + shared debug logging, nothing else.
 class BffAuthApi {
   BffAuthApi({required this.config, Dio? dio})
       : _dio = dio ??
-            Dio(BaseOptions(
-              baseUrl: config.bffBaseUrl,
-              connectTimeout: const Duration(seconds: 10),
-              receiveTimeout: const Duration(seconds: 15),
-              headers: {'Content-Type': 'application/json'},
-            )) {
-    if (kDebugMode) {
-      _dio.interceptors.add(InterceptorsWrapper(
-        onRequest: (o, h) {
-          _log('→ ${o.method} ${o.uri}');
-          h.next(o);
-        },
-        onResponse: (r, h) {
-          _log('← ${r.statusCode} ${r.requestOptions.uri}');
-          h.next(r);
-        },
-        onError: (e, h) {
-          _log('✗ ${e.requestOptions.method} ${e.requestOptions.uri} — ${e.response?.statusCode} ${e.message}');
-          if (e.response?.data != null) _log('  body=${e.response!.data}');
-          h.next(e);
-        },
-      ));
-    }
+            createDio(
+              config: config,
+              extraHeaders: const {'Content-Type': 'application/json'},
+            ) {
+    // BFF error envelope is safe to log in debug — surfaces
+    // `error_description` and `detail.attempts_left` for the integration team.
+    _dio.interceptors.add(httpLoggingInterceptor('api', logErrorBody: true));
   }
 
   final AppConfig config;
   final Dio _dio;
+
+  Future<void> dispose() async {
+    _dio.close(force: true);
+  }
 
   Future<({String accessToken, String sessionId, int expiresIn})> refresh({
     required String sessionId,
@@ -98,7 +90,8 @@ class BffAuthApi {
     final body = res.data ?? const {};
     return (
       delivery: (body['delivery'] as String?) ?? 'email',
-      expiresIn: (body['expires_in'] as num?)?.toInt() ?? 300,
+      expiresIn:
+          (body['expires_in'] as num?)?.toInt() ?? kOtpDefaultTtl.inSeconds,
       alreadyVerified: body['verified'] == true,
     );
   }
@@ -131,7 +124,8 @@ class BffAuthApi {
     final body = res.data ?? const {};
     return (
       delivery: (body['delivery'] as String?) ?? 'wa',
-      expiresIn: (body['expires_in'] as num?)?.toInt() ?? 300,
+      expiresIn:
+          (body['expires_in'] as num?)?.toInt() ?? kOtpDefaultTtl.inSeconds,
       alreadyVerified: body['verified'] == true,
     );
   }

@@ -28,6 +28,11 @@ dependencies:
   # Config
   flutter_dotenv: ^5.2.1
 
+  # Localization
+  flutter_localizations:
+    sdk: flutter
+  intl: any
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -37,5 +42,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true
   assets:
     - .env

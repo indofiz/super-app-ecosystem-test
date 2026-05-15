@@ -61,18 +61,25 @@ class _OtpInputState extends State<OtpInput> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return GestureDetector(
-      onTap: () {
-        if (widget.enabled) _focusNode.requestFocus();
-      },
-      child: Stack(
-        children: [
-          // Invisible TextField captures input. Opacity=0.01 keeps the
-          // platform IME / autofill heuristics working — fully transparent
-          // widgets are sometimes ignored by autofill engines.
-          Opacity(
-            opacity: 0.01,
-            child: TextField(
+    // Single logical semantic node — screen readers announce one
+    // "OTP code" text field instead of an underlying TextField *and* six
+    // unlabeled boxes. The painted overlay below is `ExcludeSemantics`d
+    // so it does not introduce noise.
+    return Semantics(
+      label: 'OTP code',
+      textField: true,
+      child: GestureDetector(
+        onTap: () {
+          if (widget.enabled) _focusNode.requestFocus();
+        },
+        child: Stack(
+          children: [
+            // Invisible TextField captures input. Opacity=0.01 keeps the
+            // platform IME / autofill heuristics working — fully transparent
+            // widgets are sometimes ignored by autofill engines.
+            Opacity(
+              opacity: 0.01,
+              child: TextField(
               controller: _controller,
               focusNode: _focusNode,
               autofocus: widget.autofocus,
@@ -81,42 +88,45 @@ class _OtpInputState extends State<OtpInput> {
               maxLength: widget.length,
               autofillHints: const [AutofillHints.oneTimeCode],
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                counterText: '',
-                border: InputBorder.none,
+                decoration: const InputDecoration(
+                  counterText: '',
+                  border: InputBorder.none,
+                ),
               ),
             ),
-          ),
-          IgnorePointer(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: List.generate(widget.length, (i) {
-                final v = _controller.text;
-                final ch = i < v.length ? v[i] : '';
-                final isCursor = i == v.length && _focusNode.hasFocus;
-                return Container(
-                  width: 44,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isCursor
-                          ? theme.colorScheme.primary
-                          : theme.colorScheme.outlineVariant,
-                      width: isCursor ? 2 : 1,
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    ch,
-                    style: theme.textTheme.headlineSmall,
-                  ),
-                );
-              }),
+            ExcludeSemantics(
+              child: IgnorePointer(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: List.generate(widget.length, (i) {
+                    final v = _controller.text;
+                    final ch = i < v.length ? v[i] : '';
+                    final isCursor = i == v.length && _focusNode.hasFocus;
+                    return Container(
+                      width: 44,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isCursor
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.outlineVariant,
+                          width: isCursor ? 2 : 1,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        ch,
+                        style: theme.textTheme.headlineSmall,
+                      ),
+                    );
+                  }),
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

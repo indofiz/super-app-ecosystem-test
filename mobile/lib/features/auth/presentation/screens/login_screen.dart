@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../l10n/app_localizations.dart';
+import '../auth_error_l10n.dart';
 import '../bloc/auth_bloc.dart';
 
 class LoginScreen extends StatelessWidget {
@@ -31,9 +33,12 @@ class LoginScreen extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodyLarge,
                     ),
                     const SizedBox(height: 40),
-                    if (state.errorMessage != null) ...[
+                    if (state.errorCode != null) ...[
                       Text(
-                        state.errorMessage!,
+                        authErrorMessage(
+                          AppLocalizations.of(context),
+                          state.errorCode!,
+                        ),
                         style: TextStyle(
                             color: Theme.of(context).colorScheme.error),
                         textAlign: TextAlign.center,

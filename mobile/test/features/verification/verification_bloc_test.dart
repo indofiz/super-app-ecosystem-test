@@ -1,11 +1,13 @@
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:smart_app_test/features/auth/domain/auth_repository.dart';
 import 'package:smart_app_test/features/auth/domain/auth_session.dart';
+import 'package:smart_app_test/features/verification/domain/verification_failure.dart';
+import 'package:smart_app_test/features/verification/domain/verification_repository.dart';
 import 'package:smart_app_test/features/verification/presentation/bloc/verification_bloc.dart';
 
-class _MockAuthRepository extends Mock implements AuthRepository {}
+class _MockVerificationRepository extends Mock
+    implements VerificationRepository {}
 
 AuthSession _session() => AuthSession(
       accessToken: 'jwt',
@@ -16,10 +18,10 @@ AuthSession _session() => AuthSession(
     );
 
 void main() {
-  late _MockAuthRepository repo;
+  late _MockVerificationRepository repo;
 
   setUp(() {
-    repo = _MockAuthRepository();
+    repo = _MockVerificationRepository();
   });
 
   group('email channel', () {
@@ -29,10 +31,9 @@ void main() {
         when(repo.sendEmailOtp).thenAnswer(
           (_) async => const Duration(seconds: 300),
         );
-        return VerificationBloc(authRepository: repo);
+        return VerificationBloc(verificationRepository: repo);
       },
       act: (bloc) => bloc.add(const EmailSendOtpRequested()),
-      // Two transitions: sending, then awaitingCode.
       expect: () => [
         isA<VerificationState>().having(
           (s) => s.email.status,
@@ -54,15 +55,17 @@ void main() {
     );
 
     blocTest<VerificationBloc, VerificationState>(
-      'send failure → idle with error',
+      'send failure → idle with sendOtpFailed code',
       build: () {
-        when(repo.sendEmailOtp).thenThrow(AuthFailure('SMTP down'));
-        return VerificationBloc(authRepository: repo);
+        when(repo.sendEmailOtp).thenThrow(
+          VerificationFailure(code: VerificationErrorCode.sendOtpFailed),
+        );
+        return VerificationBloc(verificationRepository: repo);
       },
       act: (bloc) => bloc.add(const EmailSendOtpRequested()),
       verify: (bloc) {
         expect(bloc.state.email.status, ChannelStatus.idle);
-        expect(bloc.state.email.errorMessage, 'SMTP down');
+        expect(bloc.state.email.errorCode, VerificationErrorCode.sendOtpFailed);
       },
     );
 
@@ -70,60 +73,69 @@ void main() {
       'verify happy path → verified',
       build: () {
         when(() => repo.verifyEmailOtp(any())).thenAnswer((_) async => _session());
-        return VerificationBloc(authRepository: repo);
+        return VerificationBloc(verificationRepository: repo);
       },
       act: (bloc) => bloc.add(const EmailVerifyOtpRequested('123456')),
       verify: (bloc) {
         expect(bloc.state.email.status, ChannelStatus.verified);
-        expect(bloc.state.email.errorMessage, isNull);
+        expect(bloc.state.email.errorCode, isNull);
       },
     );
 
     blocTest<VerificationBloc, VerificationState>(
-      'OtpInvalidFailure with attemptsLeft>0 → awaitingCode + message',
+      'otpInvalid with attemptsLeft>0 → awaitingCode + code + attemptsLeft',
       build: () {
-        when(() => repo.verifyEmailOtp(any()))
-            .thenThrow(OtpInvalidFailure(attemptsLeft: 3));
-        return VerificationBloc(authRepository: repo);
+        when(() => repo.verifyEmailOtp(any())).thenThrow(
+          VerificationFailure(
+            code: VerificationErrorCode.otpInvalid,
+            attemptsLeft: 3,
+            retryable: true,
+          ),
+        );
+        return VerificationBloc(verificationRepository: repo);
       },
       act: (bloc) => bloc.add(const EmailVerifyOtpRequested('000000')),
       verify: (bloc) {
         expect(bloc.state.email.status, ChannelStatus.awaitingCode);
-        expect(bloc.state.email.errorMessage, contains('Sisa percobaan: 3'));
+        expect(bloc.state.email.errorCode, VerificationErrorCode.otpInvalid);
+        expect(bloc.state.email.attemptsLeft, 3);
       },
     );
 
     blocTest<VerificationBloc, VerificationState>(
-      'OtpInvalidFailure with attemptsLeft=0 → idle (forces resend)',
+      'otpExhausted (attemptsLeft=0) → idle (forces resend)',
       build: () {
-        when(() => repo.verifyEmailOtp(any()))
-            .thenThrow(OtpInvalidFailure(attemptsLeft: 0));
-        return VerificationBloc(authRepository: repo);
+        when(() => repo.verifyEmailOtp(any())).thenThrow(
+          VerificationFailure(
+            code: VerificationErrorCode.otpExhausted,
+            attemptsLeft: 0,
+          ),
+        );
+        return VerificationBloc(verificationRepository: repo);
       },
       act: (bloc) => bloc.add(const EmailVerifyOtpRequested('000000')),
       verify: (bloc) {
         expect(bloc.state.email.status, ChannelStatus.idle);
-        expect(bloc.state.email.errorMessage, isNotNull);
+        expect(bloc.state.email.errorCode, VerificationErrorCode.otpExhausted);
       },
     );
 
     blocTest<VerificationBloc, VerificationState>(
-      'OtpExpiredFailure → idle, expiresAt cleared',
+      'otpExpired → idle, expiresAt cleared',
       build: () {
-        when(() => repo.verifyEmailOtp(any())).thenThrow(OtpExpiredFailure());
-        return VerificationBloc(authRepository: repo);
+        when(() => repo.verifyEmailOtp(any())).thenThrow(
+          VerificationFailure(code: VerificationErrorCode.otpExpired),
+        );
+        return VerificationBloc(verificationRepository: repo);
       },
       seed: () => const VerificationState(
-        email: ChannelState(
-          status: ChannelStatus.awaitingCode,
-          // any non-null DateTime; the bloc should clear it
-        ),
+        email: ChannelState(status: ChannelStatus.awaitingCode),
       ),
       act: (bloc) => bloc.add(const EmailVerifyOtpRequested('000000')),
       verify: (bloc) {
         expect(bloc.state.email.status, ChannelStatus.idle);
         expect(bloc.state.email.expiresAt, isNull);
-        expect(bloc.state.email.errorMessage, contains('kedaluwarsa'));
+        expect(bloc.state.email.errorCode, VerificationErrorCode.otpExpired);
       },
     );
   });
@@ -134,7 +146,7 @@ void main() {
       build: () {
         when(() => repo.sendPhoneOtp(any()))
             .thenAnswer((_) async => const Duration(seconds: 300));
-        return VerificationBloc(authRepository: repo);
+        return VerificationBloc(verificationRepository: repo);
       },
       act: (bloc) =>
           bloc.add(const PhoneSendOtpRequested('+6281234567890')),
@@ -152,7 +164,7 @@ void main() {
             .thenAnswer((_) async => const Duration(seconds: 300));
         when(() => repo.verifyPhoneOtp(any(), any()))
             .thenAnswer((_) async => _session());
-        return VerificationBloc(authRepository: repo);
+        return VerificationBloc(verificationRepository: repo);
       },
       act: (bloc) async {
         bloc.add(const PhoneSendOtpRequested('+6281234567890'));
@@ -166,11 +178,14 @@ void main() {
     );
 
     blocTest<VerificationBloc, VerificationState>(
-      'verify without a prior send → error, no repo call',
-      build: () => VerificationBloc(authRepository: repo),
+      'verify without a prior send → phoneNotEntered code, no repo call',
+      build: () => VerificationBloc(verificationRepository: repo),
       act: (bloc) => bloc.add(const PhoneVerifyOtpRequested('123456')),
       verify: (bloc) {
-        expect(bloc.state.phone.errorMessage, isNotNull);
+        expect(
+          bloc.state.phone.errorCode,
+          VerificationErrorCode.phoneNotEntered,
+        );
         verifyNever(() => repo.verifyPhoneOtp(any(), any()));
       },
     );
@@ -179,16 +194,16 @@ void main() {
   group('error clearing', () {
     blocTest<VerificationBloc, VerificationState>(
       'VerificationErrorCleared wipes only the target channel',
-      build: () => VerificationBloc(authRepository: repo),
+      build: () => VerificationBloc(verificationRepository: repo),
       seed: () => const VerificationState(
-        email: ChannelState(errorMessage: 'old email error'),
-        phone: ChannelState(errorMessage: 'old phone error'),
+        email: ChannelState(errorCode: VerificationErrorCode.otpInvalid),
+        phone: ChannelState(errorCode: VerificationErrorCode.sendOtpFailed),
       ),
       act: (bloc) =>
           bloc.add(const VerificationErrorCleared(VerificationChannel.email)),
       verify: (bloc) {
-        expect(bloc.state.email.errorMessage, isNull);
-        expect(bloc.state.phone.errorMessage, 'old phone error');
+        expect(bloc.state.email.errorCode, isNull);
+        expect(bloc.state.phone.errorCode, VerificationErrorCode.sendOtpFailed);
       },
     );
   });
