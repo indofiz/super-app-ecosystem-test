@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
+
 import '../../../core/config/auth_timings.dart';
-import '../../../core/storage/secure_store.dart';
+import '../../auth/data/datasources/auth_local_datasource.dart';
 import '../../auth/data/mock_jwt.dart';
 import '../../auth/domain/auth_error_code.dart';
 import '../../auth/domain/auth_repository.dart';
@@ -24,20 +26,27 @@ import '../domain/verification_repository.dart';
 class MockVerificationRepository implements VerificationRepository {
   MockVerificationRepository({
     required this.authRepository,
-    required this.secureStore,
-  });
+    required AuthLocalDataSource localDataSource,
+  }) : _local = localDataSource;
 
   final AuthRepository authRepository;
-  final SecureStore secureStore;
+  final AuthLocalDataSource _local;
+
+  // Mock does not honor cancellation — the in-flight delays are too
+  // short to make cancellation observable. Real cancellation lives in
+  // BffVerificationRepository.
 
   @override
-  Future<Duration> sendEmailOtp() async {
+  Future<Duration> sendEmailOtp({CancelToken? cancel}) async {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     return kOtpDefaultTtl;
   }
 
   @override
-  Future<AuthSession> verifyEmailOtp(String code) async {
+  Future<AuthSession> verifyEmailOtp(
+    String code, {
+    CancelToken? cancel,
+  }) async {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (code != '123456') {
       throw VerificationFailure(
@@ -50,7 +59,7 @@ class MockVerificationRepository implements VerificationRepository {
   }
 
   @override
-  Future<Duration> sendPhoneOtp(String phone) async {
+  Future<Duration> sendPhoneOtp(String phone, {CancelToken? cancel}) async {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     // Cache the phone on the current session so a subsequent verify
     // (which doesn't re-pass the number through the JWT) can use it.
@@ -59,7 +68,11 @@ class MockVerificationRepository implements VerificationRepository {
   }
 
   @override
-  Future<AuthSession> verifyPhoneOtp(String phone, String code) async {
+  Future<AuthSession> verifyPhoneOtp(
+    String phone,
+    String code, {
+    CancelToken? cancel,
+  }) async {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (code != '123456') {
       throw VerificationFailure(
@@ -84,23 +97,23 @@ class MockVerificationRepository implements VerificationRepository {
     String? phoneNumber,
     bool? phoneNumberVerified,
   }) async {
-    final stored = await secureStore.readSession();
-    if (stored == null) {
+    final current = await _local.read();
+    if (current == null) {
       // Auth-side failure surfaced through the verification API — the
       // user wouldn't be on this screen without a session, so this is
       // primarily defensive.
       throw AuthFailure(code: AuthErrorCode.notAuthenticated);
     }
-    final current = JwtClaims.fromToken(stored.accessToken);
+    final sub = JwtClaims.fromToken(current.accessToken).sub ?? 'mock-user';
     final session = AuthSession.fromToken(
       accessToken: mockJwt(
-        sub: current.sub ?? 'mock-user',
+        sub: sub,
         emailVerified: emailVerified ?? current.emailVerified,
         phoneNumber: phoneNumber ?? current.phoneNumber,
         phoneNumberVerified:
             phoneNumberVerified ?? current.phoneNumberVerified,
       ),
-      sessionId: stored.sessionId,
+      sessionId: current.sessionId,
       expiresAt: DateTime.now().add(kMockSessionLifetime),
     );
     await authRepository.replaceSession(session);

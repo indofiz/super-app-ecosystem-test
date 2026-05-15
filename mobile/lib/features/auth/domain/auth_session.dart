@@ -17,6 +17,13 @@ class AuthSession extends Equatable {
   /// Construct a session from a freshly-issued internal JWT. The
   /// verification flags + identity fields are derived from the JWT
   /// payload — same source the BFF mints from, same source Kong reads.
+  ///
+  /// [expiresAt] is a FALLBACK only. Whenever the JWT carries an `exp`
+  /// claim, that wins: it is the only authoritative session expiry
+  /// (audit-002 C-03). Callers typically pass
+  /// `DateTime.now() + expires_in` as the fallback for tokens with no
+  /// `exp` claim — a contract-violation path that should never fire
+  /// against the real BFF.
   factory AuthSession.fromToken({
     required String accessToken,
     required String sessionId,
@@ -26,7 +33,7 @@ class AuthSession extends Equatable {
     return AuthSession(
       accessToken: accessToken,
       sessionId: sessionId,
-      expiresAt: expiresAt,
+      expiresAt: claims.exp ?? expiresAt,
       email: claims.email,
       emailVerified: claims.emailVerified,
       phoneNumber: claims.phoneNumber,

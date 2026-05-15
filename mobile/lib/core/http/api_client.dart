@@ -36,7 +36,7 @@ class ApiClient {
     AuthSession? initialSession,
     Dio? dio,
   }) {
-    final client = dio ?? createDio(config: config);
+    final client = dio ?? createDio(config: config, withRetry: true);
 
     final tokenHolder = _TokenHolder(initialSession);
     final sub = authRepository.sessionChanges.listen(tokenHolder.set);

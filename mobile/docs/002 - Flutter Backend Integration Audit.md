@@ -12,11 +12,11 @@
 
 | #     | Issue                                                                       | Severity | Status |
 |-------|-----------------------------------------------------------------------------|----------|--------|
-| C-01  | Unchecked JSON casts in `BffAuthApi` — TypeError on any BFF contract drift  | CRITICAL | ❌     |
-| C-02  | `SampleApi` has zero error handling — `DioException` leaks raw to the UI    | CRITICAL | ❌     |
-| C-03  | Session `expiresAt` computed from `DateTime.now() + expires_in` (clock skew)| CRITICAL | ❌     |
+| C-01  | Unchecked JSON casts in `BffAuthApi` — TypeError on any BFF contract drift  | CRITICAL | ✅     |
+| C-02  | `SampleApi` has zero error handling — `DioException` leaks raw to the UI    | CRITICAL | ✅     |
+| C-03  | Session `expiresAt` computed from `DateTime.now() + expires_in` (clock skew)| CRITICAL | ✅     |
 | H-01  | No DataSource layer — repository fuses HTTP + storage + mapping             | HIGH     | ❌     |
-| H-02  | No request cancellation — in-flight calls outlive widget/bloc lifecycle     | HIGH     | ❌     |
+| H-02  | No request cancellation — in-flight calls outlive widget/bloc lifecycle     | HIGH     | ⚠️     |
 | H-03  | API responses are raw `Map<String, dynamic>` — no DTO / no compile safety   | HIGH     | ❌     |
 | H-04  | Retry only on HTTP 401 — transient 5xx and network errors surface as errors | HIGH     | ❌     |
 | H-05  | `restoreSession` emits expired session and never revalidates with `/auth/me`| HIGH     | ❌     |
@@ -28,19 +28,19 @@
 | M-04  | No correlation / request-id header — mobile↔BFF errors are not traceable    | MEDIUM   | ❌     |
 | M-05  | No HTTP-level caching strategy — `/auth/me` round-trips for data already in JWT | MEDIUM   | ❌     |
 | M-06  | Error mapping inspects only `error_description` — loses `error`/`error_code`/`detail` | MEDIUM   | ❌     |
-| M-07  | `connectionError` is not flagged retryable in `_mapDio`                     | MEDIUM   | ❌     |
+| M-07  | `connectionError` is not flagged retryable in `_mapDio`                     | MEDIUM   | ⚠️     |
 | L-01  | Anonymous record return types leak HTTP shape into call sites               | LOW      | ❌     |
-| L-02  | `getMe` defaults to `const {}` on null body — emits silent empty profile    | LOW      | ❌     |
-| L-03  | Mock vs Real session lifetime mismatch (5 min fixed vs server `expires_in`) | LOW      | ❌     |
-| L-04  | `.cast<String>()` on `roles` is lazy — failures surface far from parse site | LOW      | ❌     |
+| L-02  | `getMe` defaults to `const {}` on null body — emits silent empty profile    | LOW      | ✅     |
+| L-03  | Mock vs Real session lifetime mismatch (5 min fixed vs server `expires_in`) | LOW      | ✅     |
+| L-04  | `.cast<String>()` on `roles` is lazy — failures surface far from parse site | LOW      | ✅     |
 
-**Progress: 0/21 fixed, 0 partial, 21 remaining**
+**Progress: 6/21 fixed, 2 partial, 13 remaining** _(updated 2026-05-15 — C-01/C-02/C-03 + collateral fixes for L-02/L-03/L-04 and partial mitigations for H-02 scenario 3, M-07 on `/api/*`.)_
 
 ---
 
 ## CRITICAL Issues
 
-### ❌ C-01 Unchecked JSON casts in `BffAuthApi` — TypeError on any BFF contract drift
+### ✅ C-01 Unchecked JSON casts in `BffAuthApi` — TypeError on any BFF contract drift
 **File:** `lib/features/auth/data/bff_auth_api.dart:65-70, 81-87, 91-103, 107-119, 124-136, 140-152`
 
 **Issue:**
@@ -86,9 +86,18 @@ return (
 - Wrap `BffAuthApi` calls inside `BffAuthRepository` in `try { ... } on TypeError catch (e) { throw AuthFailure('BFF contract mismatch', cause: e); } on BffParseFailure ...` — keep the failure typed all the way to the bloc.
 - Better: replace the anonymous records with typed DTOs (see H-03) and parse via a single validating constructor.
 
+**Fix landed (2026-05-15):**
+- Added `lib/core/network/bff_parse.dart` with `BffParseFailure(field, reason)` and validating helpers: `requireBody`, `requireString`, `optionalString`, `requireInt`, `optionalInt`, `optionalBool`. `requireInt` tolerates numeric strings (`"3600"`), so the audit's case 2 produces an `expires_in: 3600` instead of throwing.
+- Rewrote all six parse sites in `bff_auth_api.dart` to use the helpers — no raw cast remains in the file. `getMe` now uses `requireBody` (closes L-02 too).
+- Added `on BffParseFailure` and `on TypeError` arms to every call site in `bff_auth_repository.dart` (`refresh`, `getProfile`) and `bff_verification_repository.dart` (all four send/verify methods). Contract drift now reaches the bloc as a typed `AuthFailure(refreshFailed | unknown)` or `VerificationFailure(sendOtpFailed | verifyOtpFailed)`, never as a raw `_TypeError`.
+- `getProfile` also eagerly materializes `roles` via `List<String>.from(...)` instead of `.cast<String>()` (closes L-04).
+- Tests: `test/core/network/bff_parse_test.dart` covers each helper's missing / wrong-type / numeric-coercion paths.
+
+DTO migration (H-03) and a single nominal `ParsedSession` constructor are deliberately kept as a follow-up — the helpers are sufficient to close the cast-throws-untyped path.
+
 ---
 
-### ❌ C-02 `SampleApi` has zero error handling — `DioException` leaks raw to the UI
+### ✅ C-02 `SampleApi` has zero error handling — `DioException` leaks raw to the UI
 **File:** `lib/features/sample/data/sample_api.dart:15-18`, `lib/features/home/presentation/home_screen.dart:53-59`
 
 **Issue:**
@@ -130,9 +139,17 @@ Comparison with the auth side: `BffAuthRepository._mapDio` exists and does most 
 - `SampleApi.getProfile` wraps the `_dio.get` in `try { ... } on DioException catch (e) { throw mapDioToFailure(e, fallback: '...'); }`.
 - The UI catches `ApiFailure` and renders `failure.message`. The repository can keep `cause` for logs.
 
+**Fix landed (2026-05-15):**
+- Added `lib/core/network/api_failure.dart` with `ApiErrorCode { network, server, unauthorized, forbidden, notFound, badRequest, parse, unknown }`, `ApiFailure(code, diagnostic, cause, retryable)`, and `mapDioToApiFailure(...)` / `mapParseToApiFailure(...)`. `mapDioToApiFailure` reuses `describeBffError` (no envelope-parsing duplication) and treats `connectionError` plus all three timeouts as retryable — picks up M-07 on the `/api/*` side as a side benefit.
+- Wrapped `SampleApi.getProfile` with `on DioException` → `mapDioToApiFailure` and `on BffParseFailure` → `mapParseToApiFailure`. The raw `Map` default (`?? const {}`) is gone — `requireBody` is used, so an empty Kong response surfaces as `ApiFailure(parse)` instead of a phantom empty profile.
+- Updated the only current call site (`lib/features/_dev/dev_dashboard.dart`) to catch `ApiFailure` and render the typed code; the stringified-`DioException` leak the audit flagged no longer reaches `setState(_error = '$e')`.
+- Tests: `test/core/network/api_failure_test.dart` covers every status-code and `DioExceptionType` branch.
+
+When future citizen-facing `/api/*` repositories ship, they inherit `ApiFailure` for free — presentation localizes off `ApiErrorCode`, the same way `AuthErrorCode` / `VerificationErrorCode` are resolved today.
+
 ---
 
-### ❌ C-03 Session `expiresAt` computed from `DateTime.now() + expires_in` — clock skew creates split-brain sessions
+### ✅ C-03 Session `expiresAt` computed from `DateTime.now() + expires_in` — clock skew creates split-brain sessions
 **File:** `lib/features/auth/data/bff_auth_repository.dart:196, 291, 329`, `lib/features/auth/data/mock_auth_repository.dart:58, 77, 113, 130, 156`
 
 **Issue:**
@@ -173,6 +190,13 @@ expiresAt: DateTime.now().add(const Duration(minutes: 5)),  // ← fixed, not fr
 - Compute `AuthSession.expiresAt` from `JwtClaims.exp` when present, falling back to `DateTime.now() + expires_in` only on parse failure.
 - For sanity (when device clock is wildly off), still expose `expires_in` to the UI for "session valid for ~N more minutes" cosmetic countdowns. Auth decisions stay tied to `exp`.
 - Mock repo: derive `expiresAt` from the `exp` claim it itself stamps. Drift between mock and real is then impossible by construction.
+
+**Fix landed (2026-05-15):**
+- Added `DateTime? exp` to `JwtClaims`. `JwtClaims.fromToken` reads `raw['exp']` via a tolerant `_decodeExp` (accepts `num` and numeric `String`, returns UTC). Missing or unparseable → null.
+- `AuthSession.fromToken` now prefers `claims.exp` over the passed `expiresAt`: `expiresAt: claims.exp ?? expiresAt`. The `expiresAt` parameter is now a fallback only, used when the token has no `exp` claim (a BFF contract violation).
+- Callers (`bff_auth_repository.refresh`, `bff_verification_repository.verifyEmailOtp` / `verifyPhoneOtp`, `mock_auth_repository.login` / `refresh`) are unchanged on the call side — the wall-clock fallback they pass is now only used on parse failure. Closes L-03 too: the mock JWT already stamps `exp` from `kMockSessionLifetime`, so the session's `expiresAt` now derives from that same source by construction; the hard-coded 5-min lifetime in mock-repo bodies is dead code (still passed as fallback, never used).
+- Logout-during-refresh race (C-03 scenario 3) mitigated: `bff_auth_repository.refresh` now re-reads `secureStore` between the API response and the local write. If storage was cleared mid-flight (concurrent `logout()`), the refresh aborts with `AuthFailure(notAuthenticated)` instead of resurrecting the session. Full request-cancellation (H-02) is still a follow-up.
+- Tests: `test/features/auth/jwt_claims_test.dart` (numeric / numeric-string / missing / non-numeric / unparseable token) and `test/features/auth/auth_session_test.dart` (prefers JWT exp; falls back when claim missing; falls back on garbage token).
 
 ---
 
@@ -221,7 +245,7 @@ The "session-aware" mediation between `_api` and `secureStore` (six methods, eac
 
 ---
 
-### ❌ H-02 No request cancellation — in-flight calls outlive widget/bloc lifecycle
+### ⚠️ H-02 No request cancellation — in-flight calls outlive widget/bloc lifecycle
 **File:** `lib/core/http/api_client.dart` (no `CancelToken` plumbing), `lib/features/auth/data/bff_auth_api.dart` (no `CancelToken` parameter on any method), `lib/features/home/presentation/home_screen.dart:25-37`, `lib/features/verification/presentation/bloc/verification_bloc.dart` (entire file)
 
 **Issue:**
@@ -242,6 +266,8 @@ Scenario 3 is the most damaging because the refresh-after-logout interleave is s
 - `AuthBloc.logout()` should cancel any in-flight refresh before clearing storage.
 - `home_screen._fetchApiProfile`: hold a `CancelToken` in state; cancel on `dispose`.
 - For AppAuth login timeouts, the right fix is upstream (the plugin needs `dispose()`); document it and accept the leak.
+
+**Partial fix landed (2026-05-15):** scenario 3 only — the "refresh writes after logout cleared storage" race. `bff_auth_repository.refresh` re-reads `secureStore` between the API response and `writeSession`; if storage is empty (concurrent `logout()` won the race), the refresh aborts with `AuthFailure(notAuthenticated)` instead of resurrecting the session. Scenarios 1, 2, 4 (widget-lifecycle cancellation, full `CancelToken` plumbing, AppAuth dispose) remain open.
 
 ---
 
@@ -665,7 +691,7 @@ Symptom for users: every BFF error looks the same on mobile. "Verifikasi gagal."
 
 ---
 
-### ❌ M-07 `connectionError` is not flagged retryable in `_mapDio`
+### ⚠️ M-07 `connectionError` is not flagged retryable in `_mapDio`
 **File:** `lib/features/auth/data/bff_auth_repository.dart:373-377`
 
 **Issue:**
@@ -683,6 +709,8 @@ The flag is set but no caller reads it today (per H-04), so the immediate impact
 **Recommendation:**
 - Add `e.type == DioExceptionType.connectionError` to the list.
 - Consider also classifying 5xx responses as retryable (currently the function never looks at status code).
+
+**Partial fix landed (2026-05-15):** the new `mapDioToApiFailure` (C-02) treats `connectionError` + all three timeouts as `retryable: true`, and 5xx as `ApiErrorCode.server` with `retryable: true`. The `/auth/*` mapper (`BffAuthRepository._mapDio` via `describeBffError.isTimeout`) still excludes `connectionError` — it covers the three timeouts only. Fix on the auth side is a one-line addition to `describeBffError` but is left for a follow-up so the failure-classification policy can be aligned in one pass with H-04 (retry interceptor).
 
 ---
 
@@ -713,7 +741,7 @@ These are DTOs in everything but name; they should be nominal classes.
 
 ---
 
-### ❌ L-02 `getMe` defaults to `const {}` on null body — emits silent empty profile
+### ✅ L-02 `getMe` defaults to `const {}` on null body — emits silent empty profile
 **File:** `lib/features/auth/data/bff_auth_api.dart:86`, `lib/features/auth/data/bff_auth_repository.dart:251-265`
 
 **Issue:**
@@ -732,9 +760,11 @@ The right behaviour for an empty body on a profile fetch is an error (server con
 **Recommendation:**
 - `getMe`: if `res.data == null` or `res.data!.isEmpty`, throw `BffParseFailure('empty /auth/me body')`. Let the repository decide whether to retry or surface.
 
+**Fix landed (2026-05-15):** collateral fix from C-01. `getMe` now uses `requireBody(res, '/auth/me')` which throws `BffParseFailure('<body>', 'empty-body')` on null or empty bodies. The repository's `on BffParseFailure` arm translates this to `AuthFailure(unknown)` with the parse detail in `diagnostic`. The phantom-empty-profile path is gone.
+
 ---
 
-### ❌ L-03 Mock vs Real session lifetime mismatch (5 min fixed vs server `expires_in`)
+### ✅ L-03 Mock vs Real session lifetime mismatch (5 min fixed vs server `expires_in`)
 **File:** `lib/features/auth/data/mock_auth_repository.dart:58, 77, 113, 130, 156, 192`, `lib/features/auth/data/bff_auth_repository.dart:196, 291, 329`
 
 **Issue:**
@@ -759,9 +789,11 @@ The right behaviour for the mock is to mirror the real repo's shape (`Duration(s
 - Inject `Duration mockSessionLifetime` into `MockAuthRepository`. Default to 15 min (matches real BFF). Tests can override to 5s for fast-expiry testing.
 - Have the mock's `_fakeJwt(exp: ...)` and the session's `expiresAt` derive from the same source.
 
+**Fix landed (2026-05-15):** collateral fix from C-03. After `AuthSession.fromToken` started preferring `claims.exp`, the mock's `expiresAt: DateTime.now().add(kMockSessionLifetime)` argument became a fallback — never used because the mock JWT already stamps `exp` from the same `kMockSessionLifetime`. Mock and real now derive `AuthSession.expiresAt` from the same source (the JWT's `exp` claim) by construction; drift is impossible. The injectable-duration / 15-min-default ergonomics from the recommendation remain a follow-up.
+
 ---
 
-### ❌ L-04 `.cast<String>()` on `roles` is lazy — failures surface far from parse site
+### ✅ L-04 `.cast<String>()` on `roles` is lazy — failures surface far from parse site
 **File:** `lib/features/auth/data/bff_auth_repository.dart:252`
 
 **Issue:**
@@ -778,6 +810,8 @@ The current shape means: a BFF accidentally emitting `{"roles": ["admin", 42]}` 
 **Recommendation:**
 - Replace with `List<String>.from(body['roles'] ?? const [])`.
 - Add the eager-cast lint rule `cast_list_strictly` (if available) or a custom analyzer plugin.
+
+**Fix landed (2026-05-15):** collateral fix from C-01. `bff_auth_repository.getProfile` now does `rolesRaw is List ? List<String>.from(rolesRaw) : const <String>[]`. A non-String element in `roles` now throws at the parse site (inside the repo's `try` block) and is translated to `AuthFailure(unknown)` with the cast detail in `diagnostic` — no more lazy CastError surfacing from a downstream `roles.contains(...)`. Adding the lint rule remains a follow-up.
 
 ---
 
@@ -802,3 +836,28 @@ The integration layer of this mobile codebase reflects a well-intentioned "data 
 3. **H-01 + C-02 + H-04: Carve out `core/network/` and `core/error/`.** A shared `DioFactory`, a shared `mapDioToFailure`, a shared `_RetryInterceptor`. `SampleApi` then inherits all three without writing any error-handling code. New `/api/*` features land on a working stack instead of building one from scratch.
 
 These three structural fixes unblock most of the remaining issues: the DTO layer enables the field-name centralisation and the lazy-cast removal; the shared error mapper lets `SampleApi` and every future API surface fail correctly; the JWT-driven expiry makes the mock and real repos consistent and prevents the "logged in but every call 401s" class of bug. The rest (cancellation tokens, correlation headers, send-timeout, caching) can land incrementally on top.
+
+---
+
+## Update 2026-05-15 — Fix wave 1: all CRITICAL closed
+
+The three CRITICAL findings (C-01, C-02, C-03) are fixed and the work also closed three LOW findings as collateral (L-02, L-03, L-04) and partially mitigated two more (H-02 scenario 3, M-07 on `/api/*`).
+
+What landed:
+
+- **`core/network/bff_parse.dart` (new).** `BffParseFailure` + validating helpers (`requireBody`, `requireString`, `optionalString`, `requireInt`, `optionalInt`, `optionalBool`). Numeric coercion built into `requireInt` defangs the audit's `"3600"` case. Used by `BffAuthApi` and `SampleApi`.
+- **`core/network/api_failure.dart` (new).** Closed `ApiErrorCode` enum + `ApiFailure` exception + `mapDioToApiFailure` (uses `describeBffError` for envelope decoding) + `mapParseToApiFailure`. Treats `connectionError` + all three timeouts as retryable, 5xx as `server, retryable: true` — picks up M-07 on the `/api/*` side.
+- **`features/auth/domain/jwt_claims.dart`.** `DateTime? exp` field, populated from `raw['exp']` via a tolerant decoder (accepts `num` and numeric `String`, returns UTC).
+- **`features/auth/domain/auth_session.dart`.** `AuthSession.fromToken` now prefers `claims.exp` over the wall-clock fallback.
+- **`features/auth/data/bff_auth_api.dart`.** All six parse sites rewritten to use the validating helpers. Anonymous record shapes preserved (DTO migration deferred to H-03).
+- **`features/auth/data/bff_auth_repository.dart`.** `refresh` and `getProfile` now catch `BffParseFailure` + `TypeError` and translate to `AuthFailure`. `refresh` also re-reads storage between API response and write (logout-race guard, mitigates H-02 scenario 3). `getProfile` materializes `roles` eagerly via `List<String>.from(...)` (closes L-04).
+- **`features/verification/data/bff_verification_repository.dart`.** Symmetric `BffParseFailure` / `TypeError` arms on all four send/verify methods.
+- **`features/sample/data/sample_api.dart`.** Wrapped with `mapDioToApiFailure` / `mapParseToApiFailure`. Raw map default (`?? const {}`) replaced by `requireBody` (closes L-02 for the `/api/*` side too).
+- **`features/_dev/dev_dashboard.dart`.** `_run` now catches `ApiFailure` and renders the typed code instead of `'$e'`. Stringified-`DioException` leak gone.
+
+What is deliberately *not* part of this slice:
+- Full DTO migration (H-03) — the helpers + records cover the immediate cast-throws path; the typed DTOs are still the right structural follow-up.
+- Full `CancelToken` plumbing (H-02 scenarios 1, 2, 4) — only the logout/refresh race is mitigated.
+- The `/auth/*` `connectionError` retryable classification (the other half of M-07). Left to bundle with H-04 (shared retry interceptor) so the failure-classification policy lands in one pass.
+
+Tests added: `test/core/network/bff_parse_test.dart`, `test/core/network/api_failure_test.dart`, `test/features/auth/jwt_claims_test.dart`, `test/features/auth/auth_session_test.dart`. `flutter analyze` clean, `flutter test` 103 / 103 passing.

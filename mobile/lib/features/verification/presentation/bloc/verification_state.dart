@@ -21,6 +21,7 @@ class ChannelState extends Equatable {
   const ChannelState({
     this.status = ChannelStatus.idle,
     this.phoneNumber,
+    this.verifyingPhone,
     this.expiresAt,
     this.errorCode,
     this.attemptsLeft,
@@ -28,8 +29,22 @@ class ChannelState extends Equatable {
 
   final ChannelStatus status;
 
-  /// Only used for the phone channel; null on the email channel.
+  /// Phone the bloc has cached from the most-recent send-OTP event.
+  /// Used by the UI for display (the "Kami telah mengirim kode ke X"
+  /// label on the code-input step). Only the phone channel uses this;
+  /// null on the email channel.
   final String? phoneNumber;
+
+  /// Phone bound to the current server-side OTP record (audit-002
+  /// H-07). Set to the value passed to `sendPhoneOtp` on a successful
+  /// send; cleared when the OTP record is gone (verify success, expiry,
+  /// or attempts exhausted). The bloc's verify call passes THIS to the
+  /// repo — distinct from [phoneNumber] so a future UI mutation of the
+  /// pending value cannot diverge what we verify against from what the
+  /// BFF expects.
+  ///
+  /// Always null on the email channel.
+  final String? verifyingPhone;
 
   /// When the current OTP record expires (server clock + TTL). Drives
   /// the resend-timer countdown.
@@ -48,6 +63,7 @@ class ChannelState extends Equatable {
   ChannelState copyWith({
     ChannelStatus? status,
     String? Function()? phoneNumber,
+    String? Function()? verifyingPhone,
     DateTime? Function()? expiresAt,
     VerificationErrorCode? Function()? errorCode,
     int? Function()? attemptsLeft,
@@ -55,6 +71,8 @@ class ChannelState extends Equatable {
     return ChannelState(
       status: status ?? this.status,
       phoneNumber: phoneNumber != null ? phoneNumber() : this.phoneNumber,
+      verifyingPhone:
+          verifyingPhone != null ? verifyingPhone() : this.verifyingPhone,
       expiresAt: expiresAt != null ? expiresAt() : this.expiresAt,
       errorCode: errorCode != null ? errorCode() : this.errorCode,
       attemptsLeft:
@@ -66,8 +84,14 @@ class ChannelState extends Equatable {
       status == ChannelStatus.sending || status == ChannelStatus.verifying;
 
   @override
-  List<Object?> get props =>
-      [status, phoneNumber, expiresAt, errorCode, attemptsLeft];
+  List<Object?> get props => [
+        status,
+        phoneNumber,
+        verifyingPhone,
+        expiresAt,
+        errorCode,
+        attemptsLeft,
+      ];
 }
 
 class VerificationState extends Equatable {

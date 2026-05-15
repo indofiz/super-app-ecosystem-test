@@ -73,7 +73,16 @@ class AppRouter {
       if (loc == '/splash' || loc == '/login') return '/home';
       return null;
     }
-    // unauthenticated / authenticating
+    if (s == AuthStatus.authenticating) {
+      // audit-002 H-05: the cold-start silent refresh lives on /splash;
+      // bouncing it to /login would flash the login screen during the
+      // probe. User-initiated login happens from /login itself, which
+      // also stays put. Only push /home users back to /login if a
+      // refresh is in flight (anticipates logout).
+      if (loc == '/home') return '/login';
+      return null;
+    }
+    // unauthenticated
     if (loc == '/splash' || loc == '/home') return '/login';
     return null;
   }

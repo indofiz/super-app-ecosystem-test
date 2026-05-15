@@ -20,6 +20,7 @@ class JwtClaims {
     this.phoneNumber,
     this.sub,
     this.username,
+    this.exp,
   });
 
   factory JwtClaims.empty() => const JwtClaims(
@@ -28,14 +29,26 @@ class JwtClaims {
         phoneNumberVerified: false,
       );
 
-  /// Parse the payload of a JWS-compact-serialized token. Does not
-  /// validate signature, issuer, audience, or expiry — that's Kong's job.
+  /// Parse the payload of a JWS-compact-serialized token.
+  ///
+  /// Rejects tokens with `alg: none` or a missing `alg` header — these are
+  /// unsigned and trivially forgeable. Does not verify the signature
+  /// (that is Kong's job), but refuses to silently accept unsigned tokens.
   factory JwtClaims.fromToken(String jwt) {
     final parts = jwt.split('.');
     if (parts.length < 2) {
       authLog('jwt', 'decode failed: token has <2 segments');
       return JwtClaims.empty();
     }
+
+    // Guard: reject alg:none and tokens with no alg header.
+    final header = decodeJwtHeader(jwt);
+    final alg = (header?['alg'] as String? ?? '').toLowerCase().trim();
+    if (alg == 'none' || alg.isEmpty) {
+      authLog('jwt', 'REJECTED: token alg="$alg" — unsigned tokens are not accepted');
+      return JwtClaims.empty();
+    }
+
     final raw = decodeJwtSegment(parts[1]);
     if (raw == null) {
       authLog('jwt', 'decode failed: payload was not a JSON object');
@@ -50,7 +63,24 @@ class JwtClaims {
       sub: raw['sub'] as String?,
       username: raw['username'] as String? ??
           raw['preferred_username'] as String?,
+      exp: _decodeExp(raw['exp']),
     );
+  }
+
+  /// Decode the JWT `exp` claim (RFC 7519 §4.1.4: seconds since epoch).
+  /// Tolerates the value being `num` or a numeric `String`. Anything else
+  /// (including null) yields null — callers fall back to a wall-clock
+  /// derived expiry. The returned [DateTime] is UTC, matching the JWT
+  /// spec; `isExpired` checks against `DateTime.now()` which auto-aligns
+  /// the comparison.
+  static DateTime? _decodeExp(Object? raw) {
+    final seconds = switch (raw) {
+      num n => n.toInt(),
+      String s => int.tryParse(s.trim()),
+      _ => null,
+    };
+    if (seconds == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true);
   }
 
   final Map<String, dynamic> raw;
@@ -60,6 +90,11 @@ class JwtClaims {
   final bool emailVerified;
   final String? phoneNumber;
   final bool phoneNumberVerified;
+
+  /// Server-stamped expiry (`exp` claim). Authoritative — callers must
+  /// prefer this over any wall-clock-derived expiry to avoid the device
+  /// clock-skew failure mode (audit-002 C-03).
+  final DateTime? exp;
 
   bool get fullyVerified => emailVerified && phoneNumberVerified;
 }

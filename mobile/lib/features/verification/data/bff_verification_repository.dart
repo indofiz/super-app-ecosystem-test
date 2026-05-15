@@ -1,62 +1,78 @@
 import 'package:dio/dio.dart';
 
-import '../../../core/config/app_config.dart';
+import '../../../core/config/auth_timings.dart';
 import '../../../core/logging/auth_log.dart';
 import '../../../core/network/bff_error.dart';
-import '../../../core/storage/secure_store.dart';
-import '../../auth/data/bff_auth_api.dart';
+import '../../../core/network/bff_parse.dart';
+import '../../auth/data/datasources/auth_local_datasource.dart';
 import '../../auth/domain/auth_repository.dart';
 import '../../auth/domain/auth_session.dart';
 import '../domain/verification_failure.dart';
 import '../domain/verification_repository.dart';
+import 'datasources/verification_remote_datasource.dart';
 
 final _log = authLogger('verify');
 
 /// Real BFF-mediated verification repository.
 ///
-/// Reads the current bearer + session_id from [SecureStore], hits
-/// `/auth/{email,phone}/{send,verify}-otp`, and on a successful verify
-/// pushes the new session back through [AuthRepository.replaceSession]
-/// so the auth stack stays the single source of truth.
+/// Orchestrates three collaborators (audit-002 H-01):
+///   - [VerificationRemoteDataSource] — `/auth/{email,phone}/{send,verify}-otp`.
+///   - [AuthLocalDataSource] — current bearer / session (shared with the
+///     auth feature; the verify flow uses the bearer to authorize the
+///     request).
+///   - [AuthRepository.replaceSession] — pushes the re-minted JWT back
+///     through the auth side so the auth stack stays the single source of
+///     truth for "the current session".
+///
+/// No direct `SecureStore` / `BffAuthApi` dependencies — those leaked
+/// out as part of the H-01 cleanup.
 class BffVerificationRepository implements VerificationRepository {
   BffVerificationRepository({
-    required this.config,
     required this.authRepository,
-    required this.secureStore,
-    BffAuthApi? api,
-  })  : _ownsApi = api == null,
-        _api = api ?? BffAuthApi(config: config);
+    required AuthLocalDataSource localDataSource,
+    required VerificationRemoteDataSource remoteDataSource,
+  })  : _local = localDataSource,
+        _remote = remoteDataSource;
 
-  final AppConfig config;
   final AuthRepository authRepository;
-  final SecureStore secureStore;
-  final BffAuthApi _api;
-  final bool _ownsApi;
+  final AuthLocalDataSource _local;
+  final VerificationRemoteDataSource _remote;
 
   @override
-  Future<Duration> sendEmailOtp() async {
-    final stored = await secureStore.readSession();
+  Future<Duration> sendEmailOtp({CancelToken? cancel}) async {
+    final stored = await _local.read();
     if (stored == null) {
       throw VerificationFailure(code: VerificationErrorCode.notAuthenticated);
     }
     try {
-      final res = await _api.sendEmailOtp(stored.accessToken);
-      _log('sendEmailOtp: delivery=${res.delivery} '
+      final res = await _remote.sendEmailOtp(
+        bearer: stored.accessToken,
+        cancel: cancel,
+      );
+      _log('sendEmailOtp: delivery=${res.delivery ?? 'email'} '
           'alreadyVerified=${res.alreadyVerified}');
-      return Duration(seconds: res.expiresIn);
+      return Duration(seconds: res.expiresIn ?? kOtpDefaultTtl.inSeconds);
     } on DioException catch (e) {
       throw _mapDio(e, fallback: VerificationErrorCode.sendOtpFailed);
+    } on BffParseFailure catch (e) {
+      throw _mapParse(e, fallback: VerificationErrorCode.sendOtpFailed);
+    } on TypeError catch (e) {
+      throw _mapTypeError(e, fallback: VerificationErrorCode.sendOtpFailed);
     }
   }
 
   @override
-  Future<AuthSession> verifyEmailOtp(String code) async {
-    final stored = await secureStore.readSession();
+  Future<AuthSession> verifyEmailOtp(String code, {CancelToken? cancel}) async {
+    final stored = await _local.read();
     if (stored == null) {
       throw VerificationFailure(code: VerificationErrorCode.notAuthenticated);
     }
     try {
-      final res = await _api.verifyEmailOtp(stored.accessToken, code);
+      final res = await _remote.verifyEmailOtp(
+        bearer: stored.accessToken,
+        code: code,
+        cancel: cancel,
+      );
       final session = AuthSession.fromToken(
         accessToken: res.accessToken,
         sessionId: res.sessionId,
@@ -67,33 +83,54 @@ class BffVerificationRepository implements VerificationRepository {
       return session;
     } on DioException catch (e) {
       throw _mapVerifyDio(e);
+    } on BffParseFailure catch (e) {
+      throw _mapParse(e, fallback: VerificationErrorCode.verifyOtpFailed);
+    } on TypeError catch (e) {
+      throw _mapTypeError(e, fallback: VerificationErrorCode.verifyOtpFailed);
     }
   }
 
   @override
-  Future<Duration> sendPhoneOtp(String phone) async {
-    final stored = await secureStore.readSession();
+  Future<Duration> sendPhoneOtp(String phone, {CancelToken? cancel}) async {
+    final stored = await _local.read();
     if (stored == null) {
       throw VerificationFailure(code: VerificationErrorCode.notAuthenticated);
     }
     try {
-      final res = await _api.sendPhoneOtp(stored.accessToken, phone);
-      _log('sendPhoneOtp: delivery=${res.delivery} '
+      final res = await _remote.sendPhoneOtp(
+        bearer: stored.accessToken,
+        phone: phone,
+        cancel: cancel,
+      );
+      _log('sendPhoneOtp: delivery=${res.delivery ?? 'wa'} '
           'alreadyVerified=${res.alreadyVerified}');
-      return Duration(seconds: res.expiresIn);
+      return Duration(seconds: res.expiresIn ?? kOtpDefaultTtl.inSeconds);
     } on DioException catch (e) {
       throw _mapDio(e, fallback: VerificationErrorCode.sendOtpFailed);
+    } on BffParseFailure catch (e) {
+      throw _mapParse(e, fallback: VerificationErrorCode.sendOtpFailed);
+    } on TypeError catch (e) {
+      throw _mapTypeError(e, fallback: VerificationErrorCode.sendOtpFailed);
     }
   }
 
   @override
-  Future<AuthSession> verifyPhoneOtp(String phone, String code) async {
-    final stored = await secureStore.readSession();
+  Future<AuthSession> verifyPhoneOtp(
+    String phone,
+    String code, {
+    CancelToken? cancel,
+  }) async {
+    final stored = await _local.read();
     if (stored == null) {
       throw VerificationFailure(code: VerificationErrorCode.notAuthenticated);
     }
     try {
-      final res = await _api.verifyPhoneOtp(stored.accessToken, phone, code);
+      final res = await _remote.verifyPhoneOtp(
+        bearer: stored.accessToken,
+        phone: phone,
+        code: code,
+        cancel: cancel,
+      );
       final session = AuthSession.fromToken(
         accessToken: res.accessToken,
         sessionId: res.sessionId,
@@ -104,12 +141,16 @@ class BffVerificationRepository implements VerificationRepository {
       return session;
     } on DioException catch (e) {
       throw _mapVerifyDio(e);
+    } on BffParseFailure catch (e) {
+      throw _mapParse(e, fallback: VerificationErrorCode.verifyOtpFailed);
+    } on TypeError catch (e) {
+      throw _mapTypeError(e, fallback: VerificationErrorCode.verifyOtpFailed);
     }
   }
 
   @override
   Future<void> dispose() async {
-    if (_ownsApi) await _api.dispose();
+    await _remote.dispose();
   }
 
   /// BFF error vocabulary on verify:
@@ -149,6 +190,35 @@ class BffVerificationRepository implements VerificationRepository {
       diagnostic: info.errorDescription,
       cause: e,
       retryable: info.isTimeout,
+    );
+  }
+
+  /// BFF contract drift — fall back to a generic failure with the parse
+  /// detail in the diagnostic for logs (audit-002 C-01). Caller picks the
+  /// fallback code so send vs verify show the right localized copy.
+  VerificationFailure _mapParse(
+    BffParseFailure e, {
+    required VerificationErrorCode fallback,
+  }) {
+    _log('BFF contract violation → $e');
+    return VerificationFailure(
+      code: fallback,
+      diagnostic: '$e',
+      cause: e,
+    );
+  }
+
+  /// Defence in depth for any future call site that bypasses
+  /// `bff_parse.dart` and lets a raw cast escape (audit-002 C-01).
+  VerificationFailure _mapTypeError(
+    TypeError e, {
+    required VerificationErrorCode fallback,
+  }) {
+    _log('unexpected TypeError → $e');
+    return VerificationFailure(
+      code: fallback,
+      diagnostic: 'TypeError: $e',
+      cause: e,
     );
   }
 }

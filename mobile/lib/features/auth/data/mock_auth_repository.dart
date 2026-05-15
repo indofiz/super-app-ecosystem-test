@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:dio/dio.dart';
+
 import '../../../core/config/auth_timings.dart';
-import '../../../core/storage/secure_store.dart';
 import '../domain/auth_error_code.dart';
 import '../domain/auth_repository.dart';
 import '../domain/auth_session.dart';
+import 'datasources/auth_local_datasource.dart';
 import 'mock_jwt.dart';
 
 /// In-app mock that mimics the BFF contract for the **auth** half:
@@ -22,11 +24,16 @@ import 'mock_jwt.dart';
 ///  - getProfile(): derives all fields from the JWT-decoded session, so
 ///    it stays in sync with whatever the verification mock minted last.
 ///
+/// Uses the same [AuthLocalDataSource] abstraction as [BffAuthRepository]
+/// (audit-002 H-01) so both impls share the persistence boundary by
+/// construction.
+///
 /// Swap to [BffAuthRepository] by flipping `USE_MOCK_AUTH=false` in `.env`.
 class MockAuthRepository implements AuthRepository {
-  MockAuthRepository({required this.secureStore});
+  MockAuthRepository({required AuthLocalDataSource localDataSource})
+      : _local = localDataSource;
 
-  final SecureStore secureStore;
+  final AuthLocalDataSource _local;
   final _controller = StreamController<AuthSession?>.broadcast();
   final _rng = Random.secure();
 
@@ -35,10 +42,10 @@ class MockAuthRepository implements AuthRepository {
 
   @override
   Future<AuthSession?> restoreSession() async {
-    final stored = await secureStore.readSession();
-    if (stored == null) return null;
-    final session = AuthSession.fromStored(stored);
-    _controller.add(session);
+    // Same contract as `BffAuthRepository.restoreSession` (audit-002
+    // H-05): does NOT emit on the stream. The bloc decides.
+    final session = await _local.read();
+    if (session == null) return null;
     return session;
   }
 
@@ -50,45 +57,46 @@ class MockAuthRepository implements AuthRepository {
       sessionId: _randomToken(32),
       expiresAt: DateTime.now().add(kMockSessionLifetime),
     );
-    await secureStore.writeSession(session.toStored());
+    await _local.write(session);
     _controller.add(session);
     return session;
   }
 
   @override
-  Future<AuthSession> refresh() async {
-    final stored = await secureStore.readSession();
+  Future<AuthSession> refresh({CancelToken? cancel}) async {
+    // Mock does not honor cancellation — the in-flight Future.delayed
+    // is too short for cancellation to be a useful observable on dev
+    // builds. Real cancellation lives in BffAuthRepository.
+    final stored = await _local.read();
     if (stored == null) throw AuthFailure(code: AuthErrorCode.notAuthenticated);
     await Future<void>.delayed(const Duration(milliseconds: 300));
     // Carry forward the verification flags from the current session — a
     // refresh must not "un-verify" the user.
-    final current = AuthSession.fromStored(stored);
     final session = AuthSession.fromToken(
       accessToken: mockJwt(
         sub: 'mock-user-refreshed',
-        emailVerified: current.emailVerified,
-        phoneNumber: current.phoneNumber,
-        phoneNumberVerified: current.phoneNumberVerified,
+        emailVerified: stored.emailVerified,
+        phoneNumber: stored.phoneNumber,
+        phoneNumberVerified: stored.phoneNumberVerified,
       ),
       sessionId: stored.sessionId,
       expiresAt: DateTime.now().add(kMockSessionLifetime),
     );
-    await secureStore.writeSession(session.toStored());
+    await _local.write(session);
     _controller.add(session);
     return session;
   }
 
   @override
-  Future<void> logout() async {
-    await secureStore.clear();
+  Future<void> logout({CancelToken? cancel}) async {
+    await _local.clear();
     _controller.add(null);
   }
 
   @override
-  Future<UserProfile> getProfile() async {
-    final stored = await secureStore.readSession();
-    if (stored == null) throw AuthFailure(code: AuthErrorCode.notAuthenticated);
-    final session = AuthSession.fromStored(stored);
+  Future<UserProfile> getProfile({CancelToken? cancel}) async {
+    final session = await _local.read();
+    if (session == null) throw AuthFailure(code: AuthErrorCode.notAuthenticated);
     return UserProfile(
       sub: 'mock-user-${_rng.nextInt(9999)}',
       username: 'mock.user',
@@ -97,13 +105,13 @@ class MockAuthRepository implements AuthRepository {
       phoneNumber: session.phoneNumber,
       phoneNumberVerified: session.phoneNumberVerified,
       roles: const ['citizen'],
-      expiresAt: stored.expiresAt,
+      expiresAt: session.expiresAt,
     );
   }
 
   @override
   Future<void> replaceSession(AuthSession session) async {
-    await secureStore.writeSession(session.toStored());
+    await _local.write(session);
     _controller.add(session);
   }
 

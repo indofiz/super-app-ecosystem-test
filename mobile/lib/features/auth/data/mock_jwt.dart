@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../../../core/config/auth_timings.dart';
 import '../../../core/jwt/jwt_codec.dart';
 
@@ -14,6 +16,10 @@ String mockJwt({
   String? phoneNumber,
   bool phoneNumberVerified = false,
 }) {
+  // Refuse to mint unsigned tokens outside debug builds. In release mode
+  // this line is unreachable because MockAuthRepository is also debug-only,
+  // but the assert provides an explicit compile-time-visible signal.
+  assert(kDebugMode, 'mockJwt() must not be called in release builds');
   final header = encodeJwtSegment({'alg': 'none', 'typ': 'JWT'});
   final payload = encodeJwtSegment({
     'iss': 'mock-bff',

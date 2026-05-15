@@ -1,13 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_app_test/core/storage/secure_store.dart';
+import 'package:smart_app_test/features/auth/data/datasources/auth_local_datasource.dart';
 import 'package:smart_app_test/features/auth/data/mock_auth_repository.dart';
 
 void main() {
   group('MockAuthRepository.dispose', () {
     test('closes the sessionChanges stream', () async {
       // We don't need a working storage backend — `dispose()` doesn't touch
-      // it. The cast to `SecureStore` is purely structural.
-      final repo = MockAuthRepository(secureStore: SecureStore());
+      // it. The casts are purely structural.
+      final repo = MockAuthRepository(
+        localDataSource:
+            AuthLocalDataSource(secureStore: SecureStore()),
+      );
 
       // Subscribe so a `done` event has somewhere to land.
       bool gotDone = false;

@@ -1,8 +1,11 @@
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../core/network/api_failure.dart';
+import '../../core/network/cancelled_exception.dart';
 import '../auth/domain/auth_repository.dart';
 import '../auth/domain/auth_session.dart';
 import '../auth/domain/jwt_claims.dart';
@@ -50,6 +53,18 @@ class _DevDashboardState extends State<DevDashboard> {
   String? _error;
   bool _busy = false;
 
+  /// Cancels in-flight `/auth/me` + `/api/profile` calls on widget
+  /// dispose (audit-002 H-02 scenario 2). Without this, a slow upstream
+  /// could complete after the dashboard is gone and `setState` on an
+  /// unmounted widget.
+  final CancelToken _cancel = CancelToken();
+
+  @override
+  void dispose() {
+    if (!_cancel.isCancelled) _cancel.cancel('DevDashboard.dispose');
+    super.dispose();
+  }
+
   Future<void> _run(Future<void> Function() task) async {
     setState(() {
       _busy = true;
@@ -57,7 +72,19 @@ class _DevDashboardState extends State<DevDashboard> {
     });
     try {
       await task();
+    } on CancelledException {
+      // Widget disposed while a request was in flight — silently drop.
+      return;
+    } on ApiFailure catch (f) {
+      if (!mounted) return;
+      // Dev-only label: presentation code (when /api/* features ship to
+      // citizens) will resolve `f.code` via AppLocalizations. Showing
+      // the diagnostic here is fine — this widget is gated behind
+      // `kDebugMode` at every call site.
+      setState(() => _error = 'ApiFailure(${f.code.name})'
+          '${f.diagnostic != null ? ' — ${f.diagnostic}' : ''}');
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = '$e');
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -66,7 +93,8 @@ class _DevDashboardState extends State<DevDashboard> {
 
   Future<void> _fetchMe() => _run(() async {
         final repo = context.read<AuthRepository>();
-        final profile = await repo.getProfile();
+        final profile = await repo.getProfile(cancel: _cancel);
+        if (!mounted) return;
         setState(() {
           _meResult = const JsonEncoder.withIndent('  ').convert({
             'sub': profile.sub,
@@ -80,9 +108,13 @@ class _DevDashboardState extends State<DevDashboard> {
 
   Future<void> _fetchApiProfile() => _run(() async {
         final api = context.read<SampleApi>();
-        final body = await api.getProfile();
+        final dto = await api.getProfile(cancel: _cancel);
+        if (!mounted) return;
         setState(() {
-          _apiResult = const JsonEncoder.withIndent('  ').convert(body);
+          // `dto.raw` is the unmodified upstream body — kept so this
+          // dev-only dashboard can hand-inspect the response shape while
+          // real consumers migrate to typed fields on the DTO.
+          _apiResult = const JsonEncoder.withIndent('  ').convert(dto.raw);
         });
       });
 

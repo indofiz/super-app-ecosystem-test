@@ -12,11 +12,11 @@
 
 | #     | Issue                                                                       | Severity | Status |
 |-------|-----------------------------------------------------------------------------|----------|--------|
-| C-01  | Release build signed with the debug keystore                                | CRITICAL | ❌     |
-| C-02  | `ALLOW_INSECURE_CONNECTIONS=true` ships in the bundled `.env` asset         | CRITICAL | ❌     |
-| C-03  | No TLS certificate / public-key pinning on Dio or AppAuth                   | CRITICAL | ❌     |
+| C-01  | Release build signed with the debug keystore                                | CRITICAL | ✅     |
+| C-02  | `ALLOW_INSECURE_CONNECTIONS=true` ships in the bundled `.env` asset         | CRITICAL | ✅     |
+| C-03  | No TLS certificate / public-key pinning on Dio or AppAuth                   | CRITICAL | ⚠️     |
 | C-04  | OAuth deeplink uses unverified custom scheme — hostile-app code interception | CRITICAL | ❌     |
-| C-05  | JWT verification flags trusted client-side without signature verification   | CRITICAL | ❌     |
+| C-05  | JWT verification flags trusted client-side without signature verification   | CRITICAL | ⚠️     |
 | H-01  | No `FLAG_SECURE` / screenshot protection on OTP & token-bearing screens     | HIGH     | ❌     |
 | H-02  | Access token, session_id, full decoded JWT rendered as `SelectableText`     | HIGH     | ❌     |
 | H-03  | Debug HTTP interceptor logs error bodies — OTP codes & tokens leak to logcat | HIGH     | ❌     |
@@ -36,13 +36,13 @@
 | L-03  | `.env.example` documents `OAUTH_CLIENT_ID=super-app-eco` — reconnaissance   | LOW      | ❌     |
 | L-04  | `SecureStore` uses `KeychainAccessibility.first_unlock` (no biometric)      | LOW      | ❌     |
 
-**Progress: 0/23 fixed, 0 partial, 23 remaining**
+**Progress: 2/23 fixed, 2 partial, 19 remaining**
 
 ---
 
 ## CRITICAL Issues
 
-### ❌ C-01 Release build signed with the debug keystore
+### ✅ C-01 Release build signed with the debug keystore
 **File:** `android/app/build.gradle.kts:34-38`
 
 **Issue:**
@@ -75,7 +75,7 @@ buildTypes {
 
 ---
 
-### ❌ C-02 `ALLOW_INSECURE_CONNECTIONS=true` ships in the bundled `.env` asset
+### ✅ C-02 `ALLOW_INSECURE_CONNECTIONS=true` ships in the bundled `.env` asset
 **File:** `.env:7`, `pubspec.yaml:40-41`, `lib/features/auth/data/bff_auth_repository.dart:106`
 
 **Issue:**
@@ -107,7 +107,7 @@ flutter:
 
 ---
 
-### ❌ C-03 No TLS certificate / public-key pinning on Dio or AppAuth
+### ⚠️ C-03 No TLS certificate / public-key pinning on Dio or AppAuth
 **File:** `lib/core/http/api_client.dart:38-43`, `lib/features/auth/data/bff_auth_api.dart:27-33`, `lib/features/auth/data/bff_auth_repository.dart:96-110`
 
 **Issue:**
@@ -166,7 +166,7 @@ manifestPlaceholders["appAuthRedirectScheme"] = "id.go.pangkalpinangkota.smartap
 
 ---
 
-### ❌ C-05 JWT verification flags trusted client-side without signature verification
+### ⚠️ C-05 JWT verification flags trusted client-side without signature verification
 **File:** `lib/features/auth/domain/jwt_claims.dart:30-57`, `lib/features/auth/domain/auth_session.dart:19-34`, `lib/features/home/presentation/widgets/verification_banner.dart:16-23`, `lib/features/verification/presentation/screens/verification_screen.dart:38-46`
 
 **Issue:**

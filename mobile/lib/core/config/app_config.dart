@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Thrown at startup when `.env` is missing values the BFF flow needs.
@@ -59,8 +60,12 @@ class AppConfig {
     final bffBaseUrl = dotenv.env['BFF_BASE_URL']?.trim() ?? '';
     final oauthClientId = dotenv.env['OAUTH_CLIENT_ID']?.trim() ?? '';
     final oauthRedirectUri = dotenv.env['OAUTH_REDIRECT_URI']?.trim() ?? '';
-    final allowInsecure =
-        readBool('ALLOW_INSECURE_CONNECTIONS', fallback: false);
+    // Release builds NEVER allow cleartext HTTP regardless of .env content.
+    // kReleaseMode is a compile-time constant so the false branch is
+    // dead-code-eliminated from release binaries entirely.
+    final allowInsecure = kReleaseMode
+        ? false
+        : readBool('ALLOW_INSECURE_CONNECTIONS', fallback: false);
 
     if (!useMockAuth) {
       if (bffBaseUrl.isEmpty) {

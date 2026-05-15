@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal Links domain for OAuth redirect (C-04).
+	     Replaces the unverified custom URL scheme — iOS verifies ownership by
+	     fetching https://mobile.pangkalpinangkota.go.id/.well-known/apple-app-site-association
+	     at install time. Only this app (matched by Team ID + Bundle ID) receives
+	     the OAuth redirect; a hostile app cannot register the same HTTPS host.
+
+	     SERVER PREREQUISITE: publish apple-app-site-association at the path above
+	     with the correct Team ID and bundle ID (id.go.pangkalpinangkota.smart_app_test)
+	     before submitting to App Store / TestFlight. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:mobile.pangkalpinangkota.go.id</string>
+	</array>
+</dict>
+</plist>

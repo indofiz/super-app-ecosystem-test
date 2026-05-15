@@ -1,0 +1,202 @@
+{
+  "attributes": [
+    {
+      "name": "username",
+      "displayName": "${username}",
+      "validations": {
+        "length": {
+          "min": 3,
+          "max": 255
+        },
+        "username-prohibited-characters": {},
+        "up-username-not-idn-homograph": {}
+      },
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin"
+        ]
+      },
+      "multivalued": false
+    },
+    {
+      "name": "email",
+      "displayName": "${email}",
+      "validations": {
+        "email": {},
+        "length": {
+          "max": 255
+        }
+      },
+      "required": {
+        "roles": [
+          "user"
+        ]
+      },
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin",
+          "user"
+        ]
+      },
+      "multivalued": false
+    },
+    {
+      "name": "fullName",
+      "displayName": "Nama Lengkap",
+      "validations": {
+        "length": {
+          "min": 3,
+          "max": 255
+        },
+        "person-name-prohibited-characters": {}
+      },
+      "required": {
+        "roles": [
+          "user"
+        ]
+      },
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin",
+          "user"
+        ]
+      },
+      "multivalued": false
+    },
+    {
+      "name": "nik",
+      "displayName": "NIK",
+      "validations": {
+        "length": {
+          "min": 16,
+          "max": 16
+        },
+        "pattern": {
+          "pattern": "^\\d{16}$",
+          "error-message": "NIK harus 16 digit angka"
+        }
+      },
+      "required": {
+        "roles": [
+          "user"
+        ]
+      },
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin",
+          "user"
+        ]
+      },
+      "multivalued": false
+    },
+    {
+      "name": "phoneNumber",
+      "displayName": "Nomor WhatsApp",
+      "validations": {
+        "pattern": {
+          "pattern": "^\\+62\\d{8,12}$",
+          "error-message": "Format: +62 diikuti 8-12 digit"
+        }
+      },
+      "required": {
+        "roles": [
+          "user"
+        ]
+      },
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin",
+          "user"
+        ]
+      },
+      "multivalued": false
+    },
+    {
+      "name": "phoneNumberVerified",
+      "displayName": "Phone Number Verified",
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin"
+        ]
+      },
+      "group": "user-metadata",
+      "multivalued": false
+    },
+    {
+      "name": "emailVerifiedAt",
+      "displayName": "Email verified at",
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin"
+        ]
+      },
+      "group": "user-metadata",
+      "multivalued": false
+    },
+    {
+      "name": "phoneVerifiedAt",
+      "displayName": "Phone verified at",
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin"
+        ]
+      },
+      "group": "user-metadata",
+      "multivalued": false
+    },
+    {
+      "name": "nikVerifiedAt",
+      "displayName": "NIK verified at",
+      "permissions": {
+        "view": [
+          "admin",
+          "user"
+        ],
+        "edit": [
+          "admin"
+        ]
+      },
+      "group": "user-metadata",
+      "multivalued": false
+    }
+  ],
+  "groups": [
+    {
+      "name": "user-metadata",
+      "displayHeader": "User metadata",
+      "displayDescription": "System-managed verification flags. Read-only for end users; written by the BFF service account after OTP verification."
+    }
+  ]
+}

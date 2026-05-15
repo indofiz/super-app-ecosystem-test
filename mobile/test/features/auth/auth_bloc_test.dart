@@ -51,16 +51,12 @@ void main() {
     );
 
     blocTest<AuthBloc, AuthState>(
-      'emits authenticated when a valid session is restored',
-      // Mirror the real repo: restoreSession() emits on `sessionChanges`
-      // whenever it finds a stored session. The bloc reaches
-      // `authenticated` via the stream, not via an explicit handler emit.
+      'emits authenticated directly for a fresh local session',
+      // audit-002 H-05: restoreSession no longer emits on the stream.
+      // The bloc emits `authenticated` from the handler itself.
       build: () {
         final s = validSession();
-        when(repo.restoreSession).thenAnswer((_) async {
-          sessionController.add(s);
-          return s;
-        });
+        when(repo.restoreSession).thenAnswer((_) async => s);
         return AuthBloc(authRepository: repo);
       },
       act: (bloc) async {
@@ -74,16 +70,18 @@ void main() {
     );
 
     blocTest<AuthBloc, AuthState>(
-      'emits unauthenticated when the restored session is expired',
-      // Real repo emits the expired session too; bloc downgrades to
-      // unauthenticated based on the `isExpired` check, then the stream
-      // emission for the same session is a no-op because the bloc state
-      // already shows unauthenticated.
+      'expired restored session triggers silent refresh '
+      '→ authenticating, then authenticated via stream on success',
+      // audit-002 H-05: an expired local session no longer means
+      // unauthenticated. The bloc emits `authenticating` and calls
+      // refresh(). The successful refresh emits on the stream;
+      // _onSessionChanged lifts to authenticated.
       build: () {
-        final s = expiredSession();
-        when(repo.restoreSession).thenAnswer((_) async {
-          sessionController.add(s);
-          return s;
+        when(repo.restoreSession).thenAnswer((_) async => expiredSession());
+        when(() => repo.refresh()).thenAnswer((_) async {
+          final fresh = validSession();
+          sessionController.add(fresh);
+          return fresh;
         });
         return AuthBloc(authRepository: repo);
       },
@@ -92,8 +90,26 @@ void main() {
         await Future<void>.delayed(Duration.zero);
       },
       verify: (bloc) {
-        expect(bloc.state.status, AuthStatus.unauthenticated);
+        expect(bloc.state.status, AuthStatus.authenticated);
       },
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'expired restored session, refresh fails → unauthenticated with code',
+      build: () {
+        when(repo.restoreSession).thenAnswer((_) async => expiredSession());
+        when(() => repo.refresh()).thenThrow(
+          AuthFailure(code: AuthErrorCode.sessionExpired),
+        );
+        return AuthBloc(authRepository: repo);
+      },
+      act: (bloc) => bloc.add(const AuthStarted()),
+      expect: () => [
+        const AuthState.authenticating(),
+        const AuthState.unauthenticated(
+          errorCode: AuthErrorCode.sessionExpired,
+        ),
+      ],
     );
   });
 
@@ -139,7 +155,7 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits authenticated with new session on success',
       build: () {
-        when(repo.refresh).thenAnswer((_) async {
+        when(() => repo.refresh()).thenAnswer((_) async {
           final s = validSession();
           sessionController.add(s);
           return s;
@@ -158,7 +174,7 @@ void main() {
     blocTest<AuthBloc, AuthState>(
       'emits unauthenticated with code when refresh fails',
       build: () {
-        when(repo.refresh).thenThrow(
+        when(() => repo.refresh()).thenThrow(
           AuthFailure(code: AuthErrorCode.refreshFailed),
         );
         return AuthBloc(authRepository: repo);
@@ -177,7 +193,7 @@ void main() {
       // The handler's explicit `unauthenticated(errorCode: ...)` must survive
       // the subsequent `_AuthSessionChanged(null)` event.
       build: () {
-        when(repo.refresh).thenAnswer((_) async {
+        when(() => repo.refresh()).thenAnswer((_) async {
           sessionController.add(null);
           throw AuthFailure(code: AuthErrorCode.sessionExpired);
         });

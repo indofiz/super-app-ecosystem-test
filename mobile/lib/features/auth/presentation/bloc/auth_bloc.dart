@@ -51,17 +51,34 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   late final StreamSubscription<AuthSession?> _sub;
 
   Future<void> _onStarted(AuthStarted event, Emitter<AuthState> emit) async {
+    // audit-002 H-05: restoreSession() no longer emits on the stream.
+    // This handler classifies the restored session and either:
+    //   - emits `unauthenticated` for null storage,
+    //   - emits `authenticated` directly for a fresh local session,
+    //   - emits `authenticating` and triggers a silent refresh for an
+    //     expired one (the refresh path emits on the stream on success
+    //     and emits null on `sessionExpired` failure).
     _log('onStarted');
     final session = await authRepository.restoreSession();
-    // restoreSession() emits the restored session on the stream when one
-    // is found — _onSessionChanged will lift the bloc into `authenticated`.
-    // Only emit `unauthenticated` for the negative paths (no session, expired).
-    if (session == null || session.isExpired) {
-      _log('onStarted → unauthenticated (session=${session != null ? 'expired' : 'null'})');
+    if (session == null) {
+      _log('onStarted → unauthenticated (no session)');
       emit(const AuthState.unauthenticated());
-    } else {
-      _log('onStarted → authenticated (via stream)');
+      return;
     }
+    if (session.isExpired) {
+      _log('onStarted → expired session, attempting silent refresh');
+      emit(const AuthState.authenticating());
+      try {
+        await authRepository.refresh();
+        _log('onStarted → refresh OK (state will be emitted by stream)');
+      } on AuthFailure catch (e) {
+        _log('onStarted → refresh failed ($e)');
+        emit(AuthState.unauthenticated(errorCode: e.code));
+      }
+      return;
+    }
+    _log('onStarted → authenticated (fresh local session)');
+    emit(AuthState.authenticated(session));
   }
 
   Future<void> _onLoginRequested(

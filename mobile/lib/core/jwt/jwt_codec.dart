@@ -16,6 +16,13 @@ String encodeJwtSegment(Map<String, dynamic> json) {
   return base64Url.encode(utf8.encode(jsonEncode(json))).replaceAll('=', '');
 }
 
+/// Returns the JWT header map (segment 0), or null on any decode failure.
+Map<String, dynamic>? decodeJwtHeader(String jwt) {
+  final parts = jwt.split('.');
+  if (parts.length < 2) return null;
+  return decodeJwtSegment(parts[0]);
+}
+
 Map<String, dynamic>? decodeJwtSegment(String segment) {
   if (segment.isEmpty) return null;
   final mod = segment.length % 4;

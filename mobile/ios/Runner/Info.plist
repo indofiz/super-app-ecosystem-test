@@ -45,6 +45,8 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- TODO(C-04): replace with Universal Links once mobile.pangkalpinangkota.go.id
+	     is live and apple-app-site-association is published. -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

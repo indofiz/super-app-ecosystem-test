@@ -1,9 +1,12 @@
 import 'package:dio/dio.dart';
 
 import '../../../core/config/app_config.dart';
-import '../../../core/config/auth_timings.dart';
+import '../../../core/network/bff_parse.dart';
+import '../../../core/network/cancelled_exception.dart';
 import '../../../core/network/dio_factory.dart';
 import '../../../core/network/logging_interceptor.dart';
+import 'dto/me_response_dto.dart';
+import 'dto/refresh_response_dto.dart';
 
 /// Thin HTTP client for the BFF auth endpoints.
 ///
@@ -15,23 +18,33 @@ import '../../../core/network/logging_interceptor.dart';
 ///
 ///   POST /auth/refresh  hdr: `Authorization: Bearer ...`
 ///                       body: {"session_id": "..."}
-///                       -> {access_token, expires_in, session_id}
+///                       -> {access_token, expires_in, session_id?}
 ///   POST /auth/logout   hdr: `Authorization: Bearer ...`
 ///                       body: {"session_id": "..."}
 ///                       -> 204
 ///   GET  /auth/me       hdr: `Authorization: Bearer ...`
-///                       -> {sub, username, email, roles, expiresAt}
+///                       -> {sub, username, email, roles, expiresAt, ...}
+///
+/// The OTP send/verify endpoints live in [BffVerificationApi] under the
+/// verification feature (audit-002 H-01 — split out so the verification
+/// repo no longer imports across feature boundaries).
 ///
 /// Deliberately does NOT use the workspace-shared `ApiClient` (which
 /// auto-attaches a bearer and retries on 401). `/auth/refresh` running
 /// through a 401-retry loop would recurse forever, so this stack stays
 /// minimal: shared timeouts + shared debug logging, nothing else.
+///
+/// Return contract (audit-002 H-03): every method returns a typed DTO,
+/// parsed by the DTO's `fromJson` via `bff_parse.dart`. Contract drift
+/// surfaces as a [BffParseFailure] at the DTO boundary, never as a raw
+/// `TypeError` further up the stack.
 class BffAuthApi {
   BffAuthApi({required this.config, Dio? dio})
       : _dio = dio ??
             createDio(
               config: config,
               extraHeaders: const {'Content-Type': 'application/json'},
+              withRetry: true,
             ) {
     // BFF error envelope is safe to log in debug — surfaces
     // `error_description` and `detail.attempts_left` for the integration team.
@@ -45,104 +58,42 @@ class BffAuthApi {
     _dio.close(force: true);
   }
 
-  Future<({String accessToken, String sessionId, int expiresIn})> refresh({
+  Future<RefreshResponseDto> refresh({
     required String sessionId,
     required String bearer,
-  }) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/auth/refresh',
-      data: {'session_id': sessionId},
-      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
-    );
-    final body = res.data ?? const {};
-    return (
-      accessToken: body['access_token'] as String,
-      sessionId: (body['session_id'] as String?) ?? sessionId,
-      expiresIn: (body['expires_in'] as num).toInt(),
-    );
-  }
+    CancelToken? cancel,
+  }) =>
+      withCancelTranslation(() async {
+        final res = await _dio.post<Map<String, dynamic>>(
+          '/auth/refresh',
+          data: {'session_id': sessionId},
+          options: Options(headers: {'Authorization': 'Bearer $bearer'}),
+          cancelToken: cancel,
+        );
+        return RefreshResponseDto.fromJson(requireBody(res, '/auth/refresh'));
+      });
 
-  Future<void> logout({required String sessionId, required String bearer}) async {
-    await _dio.post(
-      '/auth/logout',
-      data: {'session_id': sessionId},
-      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
-    );
-  }
+  Future<void> logout({
+    required String sessionId,
+    required String bearer,
+    CancelToken? cancel,
+  }) =>
+      withCancelTranslation(() async {
+        await _dio.post(
+          '/auth/logout',
+          data: {'session_id': sessionId},
+          options: Options(headers: {'Authorization': 'Bearer $bearer'}),
+          cancelToken: cancel,
+        );
+      });
 
-  Future<Map<String, dynamic>> getMe(String bearer) async {
-    final res = await _dio.get<Map<String, dynamic>>(
-      '/auth/me',
-      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
-    );
-    return res.data ?? const {};
-  }
-
-  /// POST /auth/email/send-otp — 202 with `{delivery, expires_in}`, or
-  /// 200 with `{verified: true}` if the email is already verified.
-  Future<({String delivery, int expiresIn, bool alreadyVerified})>
-      sendEmailOtp(String bearer) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/auth/email/send-otp',
-      data: const <String, dynamic>{},
-      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
-    );
-    final body = res.data ?? const {};
-    return (
-      delivery: (body['delivery'] as String?) ?? 'email',
-      expiresIn:
-          (body['expires_in'] as num?)?.toInt() ?? kOtpDefaultTtl.inSeconds,
-      alreadyVerified: body['verified'] == true,
-    );
-  }
-
-  /// POST /auth/email/verify-otp — 200 with a fresh session on success.
-  Future<({String accessToken, String sessionId, int expiresIn})>
-      verifyEmailOtp(String bearer, String code) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/auth/email/verify-otp',
-      data: {'code': code},
-      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
-    );
-    final body = res.data ?? const {};
-    return (
-      accessToken: body['access_token'] as String,
-      sessionId: body['session_id'] as String,
-      expiresIn: (body['expires_in'] as num).toInt(),
-    );
-  }
-
-  /// POST /auth/phone/send-otp — 202 with `{delivery, expires_in}`, or
-  /// 200 with `{verified: true}` if the phone is already verified.
-  Future<({String delivery, int expiresIn, bool alreadyVerified})>
-      sendPhoneOtp(String bearer, String phone) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/auth/phone/send-otp',
-      data: {'phone': phone},
-      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
-    );
-    final body = res.data ?? const {};
-    return (
-      delivery: (body['delivery'] as String?) ?? 'wa',
-      expiresIn:
-          (body['expires_in'] as num?)?.toInt() ?? kOtpDefaultTtl.inSeconds,
-      alreadyVerified: body['verified'] == true,
-    );
-  }
-
-  /// POST /auth/phone/verify-otp — 200 with a fresh session on success.
-  Future<({String accessToken, String sessionId, int expiresIn})>
-      verifyPhoneOtp(String bearer, String phone, String code) async {
-    final res = await _dio.post<Map<String, dynamic>>(
-      '/auth/phone/verify-otp',
-      data: {'phone': phone, 'code': code},
-      options: Options(headers: {'Authorization': 'Bearer $bearer'}),
-    );
-    final body = res.data ?? const {};
-    return (
-      accessToken: body['access_token'] as String,
-      sessionId: body['session_id'] as String,
-      expiresIn: (body['expires_in'] as num).toInt(),
-    );
-  }
+  Future<MeResponseDto> getMe(String bearer, {CancelToken? cancel}) =>
+      withCancelTranslation(() async {
+        final res = await _dio.get<Map<String, dynamic>>(
+          '/auth/me',
+          options: Options(headers: {'Authorization': 'Bearer $bearer'}),
+          cancelToken: cancel,
+        );
+        return MeResponseDto.fromJson(requireBody(res, '/auth/me'));
+      });
 }

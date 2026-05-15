@@ -1,0 +1,24 @@
+# Copy this file to android/key.properties and fill in the real values.
+# key.properties is gitignored — NEVER commit it or the .jks file.
+# In CI, inject these as secrets and write them to android/key.properties
+# before running `flutter build apk --release`.
+#
+# Generate a new keystore (one-time, keep the .jks in a secure vault):
+#
+#   keytool -genkey -v \
+#     -keystore upload-keystore.jks \
+#     -storetype JKS \
+#     -keyalg RSA \
+#     -keysize 2048 \
+#     -validity 10000 \
+#     -alias upload \
+#     -dname "CN=Pangkal Pinang Smart App, OU=DISKOMINFO, O=Pemerintah Kota Pangkalpinang, L=Pangkalpinang, ST=Kepulauan Bangka Belitung, C=ID"
+#
+# After generating, extract the SHA-256 fingerprint for assetlinks.json (C-04):
+#
+#   keytool -list -v -keystore upload-keystore.jks -alias upload
+
+storePassword=<keystore-password>
+keyPassword=<key-password>
+keyAlias=upload
+storeFile=<absolute-or-project-relative-path-to-upload-keystore.jks>

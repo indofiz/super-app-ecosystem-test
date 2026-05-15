@@ -7,15 +7,26 @@ import '../../../core/config/app_config.dart';
 import '../../../core/config/auth_timings.dart';
 import '../../../core/logging/auth_log.dart';
 import '../../../core/network/bff_error.dart';
-import '../../../core/storage/secure_store.dart';
+import '../../../core/network/bff_parse.dart';
+import '../../../core/network/cancelled_exception.dart';
 import '../domain/auth_error_code.dart';
 import '../domain/auth_repository.dart';
 import '../domain/auth_session.dart';
-import 'bff_auth_api.dart';
+import 'datasources/auth_local_datasource.dart';
+import 'datasources/auth_remote_datasource.dart';
 
 final _log = authLogger('repo');
 
 /// Real BFF-mediated auth repository.
+///
+/// Orchestrates exactly two collaborators:
+///   - [AuthLocalDataSource] — persisted-session shape, hides
+///     `SecureStore` / `StoredSession`.
+///   - [AuthRemoteDataSource] — BFF `/auth/*` calls, hides `BffAuthApi` /
+///     Dio.
+///
+/// Plus [FlutterAppAuth] for the OAuth deeplink round-trip on [login].
+/// Everything else is orchestration (audit-002 H-01).
 ///
 /// Uses flutter_appauth pointed at BFF endpoints (NOT Keycloak directly).
 /// The BFF performs the OAuth/PKCE handshake with Keycloak, then mints a
@@ -28,20 +39,17 @@ final _log = authLogger('repo');
 class BffAuthRepository implements AuthRepository {
   BffAuthRepository({
     required this.config,
-    required this.secureStore,
+    required AuthLocalDataSource localDataSource,
+    required AuthRemoteDataSource remoteDataSource,
     FlutterAppAuth? appAuth,
-    BffAuthApi? api,
-  })  : _appAuth = appAuth ?? const FlutterAppAuth(),
-        _ownsApi = api == null,
-        _api = api ?? BffAuthApi(config: config);
+  })  : _local = localDataSource,
+        _remote = remoteDataSource,
+        _appAuth = appAuth ?? const FlutterAppAuth();
 
   final AppConfig config;
-  final SecureStore secureStore;
+  final AuthLocalDataSource _local;
+  final AuthRemoteDataSource _remote;
   final FlutterAppAuth _appAuth;
-  final BffAuthApi _api;
-  // True when this repo constructed its own [BffAuthApi] and therefore owns
-  // its lifecycle. When injected (tests), the caller disposes it.
-  final bool _ownsApi;
 
   final _controller = StreamController<AuthSession?>.broadcast();
 
@@ -50,16 +58,19 @@ class BffAuthRepository implements AuthRepository {
 
   @override
   Future<AuthSession?> restoreSession() async {
-    _log('restoreSession: reading secure storage');
-    final stored = await secureStore.readSession();
-    if (stored == null) {
+    // audit-002 H-05: NO stream emit here. The bloc decides whether the
+    // restored session is fresh enough to lift into `authenticated`
+    // directly, or whether to trigger a silent refresh first. Emitting
+    // would let `ApiClient`'s token holder cache an expired bearer
+    // before the bloc could classify it.
+    _log('restoreSession: reading local store');
+    final session = await _local.read();
+    if (session == null) {
       _log('restoreSession: no stored session');
       return null;
     }
     _log(
-        'restoreSession: found session, sid=${stored.sessionId.substring(0, 6)}…, expiresAt=${stored.expiresAt.toIso8601String()}');
-    final session = AuthSession.fromStored(stored);
-    _controller.add(session);
+        'restoreSession: found session, sid=${session.sessionId.substring(0, 6)}…, expiresAt=${session.expiresAt.toIso8601String()}');
     return session;
   }
 
@@ -113,21 +124,20 @@ class BffAuthRepository implements AuthRepository {
         );
       }
 
-      // Note: result.idToken is null with the new BFF — we store null here and
-      // fetch profile via /auth/me when needed. `fromToken` decodes the JWT
-      // payload and seeds emailVerified / phoneNumberVerified from the
-      // BFF-signed claims — avoids a /auth/me round-trip after every refresh.
       final session = AuthSession.fromToken(
         accessToken: accessToken,
         sessionId: sessionId,
         expiresAt: expiresAt,
       );
 
-      _log('login: writing session to secure storage');
-      await secureStore.writeSession(session.toStored());
+      _log('login: writing session to local store');
+      await _local.write(session);
+      // Replace JWT-decoded flags with BFF-confirmed values from /auth/me.
+      final enriched = await _enrichFromProfile(session);
+      if (enriched != session) await _local.write(enriched);
       _log('login: SUCCESS in ${stopwatch.elapsedMilliseconds}ms');
-      _controller.add(session);
-      return session;
+      _controller.add(enriched);
+      return enriched;
     } on TimeoutException catch (e) {
       _log('login: TIMEOUT after ${stopwatch.elapsedMilliseconds}ms — AppAuth never returned (likely Android killed the task while Custom Tab was open)');
       throw AuthFailure(
@@ -137,10 +147,6 @@ class BffAuthRepository implements AuthRepository {
       );
     } on FlutterAppAuthUserCancelledException catch (e) {
       _log('login: CANCELLED after ${stopwatch.elapsedMilliseconds}ms — code=${e.code} msg=${e.message}');
-      // "User cancelled" can also fire when AppAuth fails to discover a
-      // browser, when the Custom Tabs intent fails to launch, or when a
-      // launchMode mismatch loses the redirect callback. The diagnostic
-      // captures both so logs can tell which.
       throw AuthFailure(
         code: AuthErrorCode.loginCancelled,
         diagnostic: 'code=${e.code} msg=${e.message}',
@@ -166,26 +172,42 @@ class BffAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AuthSession> refresh() async {
-    final stored = await secureStore.readSession();
+  Future<AuthSession> refresh({CancelToken? cancel}) async {
+    final stored = await _local.read();
     if (stored == null) {
       throw AuthFailure(code: AuthErrorCode.notAuthenticated);
     }
     // BFF requires the bearer (§2.1). Even an expired access_token works
     // — the BFF accepts up to 24h past expiry on /refresh.
     try {
-      final res = await _api.refresh(
+      final res = await _remote.refresh(
         sessionId: stored.sessionId,
         bearer: stored.accessToken,
+        cancel: cancel,
       );
+      // C-03 scenario 3 guard: a concurrent `logout()` may have cleared
+      // storage while we were awaiting the refresh response. Writing the
+      // fresh session now would resurrect a session the user just signed
+      // out of. Drop the result silently — the bloc already saw null on
+      // the stream from logout().
+      final current = await _local.read();
+      if (current == null) {
+        _log('refresh: aborting write — local store cleared mid-flight (logout race)');
+        throw AuthFailure(code: AuthErrorCode.notAuthenticated);
+      }
+      // /auth/refresh may omit `session_id` when the rotation does not
+      // change it — fall back to the stored ID in that case.
       final session = AuthSession.fromToken(
         accessToken: res.accessToken,
-        sessionId: res.sessionId,
+        sessionId: res.sessionId ?? stored.sessionId,
         expiresAt: DateTime.now().add(Duration(seconds: res.expiresIn)),
       );
-      await secureStore.writeSession(session.toStored());
-      _controller.add(session);
-      return session;
+      await _local.write(session);
+      // Replace JWT-decoded flags with BFF-confirmed values from /auth/me.
+      final enriched = await _enrichFromProfile(session);
+      if (enriched != session) await _local.write(enriched);
+      _controller.add(enriched);
+      return enriched;
     } on DioException catch (e) {
       // The BFF says the server-side session is gone (Redis wiped, BFF
       // restarted, or session explicitly invalidated). Local credentials
@@ -198,7 +220,7 @@ class BffAuthRepository implements AuthRepository {
           (body is Map && body['error'] == 'invalid_session');
       if (isInvalidSession) {
         _log('refresh: session gone server-side → clearing local state');
-        await secureStore.clear();
+        await _local.clear();
         _controller.add(null);
         throw AuthFailure(
           code: AuthErrorCode.sessionExpired,
@@ -206,58 +228,158 @@ class BffAuthRepository implements AuthRepository {
         );
       }
       throw _mapDio(e, fallback: AuthErrorCode.refreshFailed);
+    } on CancelledException {
+      // Caller-initiated cancellation propagates verbatim; the local
+      // session stays intact because we never wrote anything.
+      rethrow;
+    } on BffParseFailure catch (e) {
+      _log('refresh: BFF contract violation → $e');
+      throw AuthFailure(
+        code: AuthErrorCode.refreshFailed,
+        diagnostic: '$e',
+        cause: e,
+      );
+    } on TypeError catch (e, st) {
+      // Defence in depth: a future call site that bypasses the parse
+      // helpers would otherwise propagate a raw TypeError past the data
+      // layer. Translate it identically (audit-002 C-01).
+      _log('refresh: unexpected TypeError → $e\n$st');
+      throw AuthFailure(
+        code: AuthErrorCode.refreshFailed,
+        diagnostic: 'TypeError: $e',
+        cause: e,
+      );
     }
   }
 
   @override
-  Future<void> logout() async {
-    final stored = await secureStore.readSession();
-    if (stored != null) {
-      try {
-        await _api.logout(
-          sessionId: stored.sessionId,
-          bearer: stored.accessToken,
-        );
-      } catch (_) {
-        // Best-effort: still wipe local state if BFF is unreachable.
-      }
-    }
-    await secureStore.clear();
+  Future<void> logout({CancelToken? cancel}) async {
+    // audit-002 H-06: run the BFF logout and the local clear in PARALLEL.
+    // The local clear used to wait for a 15s receiveTimeout if the BFF
+    // was unreachable; during that window the app was in a half-logged-
+    // out state where every page still saw a valid session in storage.
+    // Now the local clear races the BFF call — whichever resolves first
+    // doesn't block the other.
+    //
+    // The remote call is best-effort and never re-throws: a failure to
+    // notify the BFF leaves a server-side zombie session (Redis entry +
+    // Keycloak refresh_token), which is logged but not surfaced to the
+    // user. A future pass should queue failed logouts for retry on next
+    // launch (TODO: pending-logouts retry queue).
+    final stored = await _local.read();
+    final remoteCall = stored == null
+        ? Future<void>.value()
+        : _logoutRemoteBestEffort(stored, cancel: cancel);
+    await Future.wait<void>([remoteCall, _local.clear()]);
     _controller.add(null);
   }
 
+  /// Best-effort BFF logout — never re-throws. Logs every failure mode
+  /// distinctly so the on-call engineer can tell a network blip from a
+  /// genuine server reject:
+  ///   - cancellation → caller-initiated; local clear still proceeds.
+  ///   - timeouts / connectionError → expected on offline logout.
+  ///   - 401 → server already considers the session dead. No zombie.
+  ///   - other 4xx/5xx with body → likely zombie session; warning-level.
+  Future<void> _logoutRemoteBestEffort(
+    AuthSession session, {
+    CancelToken? cancel,
+  }) async {
+    try {
+      await _remote.logout(
+        sessionId: session.sessionId,
+        bearer: session.accessToken,
+        cancel: cancel,
+      );
+      _log('logout: BFF acknowledged');
+    } on CancelledException {
+      _log('logout: BFF call cancelled by caller — local clear proceeds');
+    } on DioException catch (e) {
+      final info = describeBffError(e);
+      if (info.isTimeout || e.type == DioExceptionType.connectionError) {
+        _log('logout: BFF unreachable (${e.type.name}) '
+            '— local clear proceeds');
+      } else if (e.response?.statusCode == 401) {
+        _log('logout: BFF returned 401 '
+            '— session already invalid server-side');
+      } else {
+        _log('logout: BFF rejected logout status=${info.statusCode} '
+            'desc=${info.errorDescription} '
+            '— local clear proceeds, server-side session may persist');
+      }
+    } catch (e) {
+      _log('logout: BFF logout failed unexpectedly ($e) '
+          '— local clear proceeds');
+    }
+  }
+
   @override
-  Future<UserProfile> getProfile() async {
-    final stored = await secureStore.readSession();
+  Future<UserProfile> getProfile({CancelToken? cancel}) async {
+    final stored = await _local.read();
     if (stored == null) {
       throw AuthFailure(code: AuthErrorCode.notAuthenticated);
     }
-    final body = await _api.getMe(stored.accessToken);
-    final roles = (body['roles'] as List?)?.cast<String>() ?? const [];
-    final expiresAt = body['expiresAt'] is String
-        ? DateTime.tryParse(body['expiresAt'] as String)
-        : null;
-    return UserProfile(
-      sub: (body['sub'] as String?) ?? '',
-      username: body['username'] as String?,
-      email: body['email'] as String?,
-      emailVerified: body['emailVerified'] == true,
-      phoneNumber: body['phoneNumber'] as String?,
-      phoneNumberVerified: body['phoneNumberVerified'] == true,
-      roles: roles,
-      expiresAt: expiresAt,
-    );
+    try {
+      final dto =
+          await _remote.getMe(bearer: stored.accessToken, cancel: cancel);
+      return UserProfile(
+        sub: dto.sub,
+        username: dto.username,
+        email: dto.email,
+        emailVerified: dto.emailVerified,
+        phoneNumber: dto.phoneNumber,
+        phoneNumberVerified: dto.phoneNumberVerified,
+        roles: dto.roles,
+        expiresAt: dto.expiresAt,
+      );
+    } on DioException catch (e) {
+      throw _mapDio(e, fallback: AuthErrorCode.unknown);
+    } on BffParseFailure catch (e) {
+      _log('getProfile: BFF contract violation → $e');
+      throw AuthFailure(
+        code: AuthErrorCode.unknown,
+        diagnostic: '$e',
+        cause: e,
+      );
+    } on TypeError catch (e, st) {
+      _log('getProfile: unexpected TypeError → $e\n$st');
+      throw AuthFailure(
+        code: AuthErrorCode.unknown,
+        diagnostic: 'TypeError: $e',
+        cause: e,
+      );
+    }
   }
 
   @override
   Future<void> replaceSession(AuthSession session) async {
-    await secureStore.writeSession(session.toStored());
+    await _local.write(session);
     _controller.add(session);
+  }
+
+  /// Best-effort enrichment: calls `/auth/me` to replace JWT-decoded identity
+  /// flags with BFF-confirmed values. If the call fails for any reason the
+  /// original session is returned unchanged — JWT-decoded flags act as a
+  /// degraded fallback rather than causing a hard login failure.
+  Future<AuthSession> _enrichFromProfile(AuthSession session) async {
+    try {
+      final dto = await _remote.getMe(bearer: session.accessToken);
+      final enriched = session.copyWith(
+        email: dto.email,
+        emailVerified: dto.emailVerified,
+        phoneNumber: dto.phoneNumber,
+        phoneNumberVerified: dto.phoneNumberVerified,
+      );
+      return enriched;
+    } catch (e) {
+      _log('_enrichFromProfile: /auth/me failed ($e) — using JWT-decoded flags');
+      return session;
+    }
   }
 
   @override
   Future<void> dispose() async {
-    if (_ownsApi) await _api.dispose();
+    await _remote.dispose();
     await _controller.close();
   }
 

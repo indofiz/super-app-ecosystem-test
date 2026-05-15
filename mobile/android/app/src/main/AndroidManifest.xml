@@ -30,6 +30,10 @@
                  hijack the redirect (Flutter's deeplink handling routes the
                  URL into GoRouter instead of letting AppAuth complete). -->
         </activity>
+        <!-- TODO(C-04): replace custom scheme with verified App Links once
+             mobile.pangkalpinangkota.go.id is live and assetlinks.json is
+             published. Until then the scheme below is registered by the
+             appAuthRedirectScheme placeholder in build.gradle.kts. -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
