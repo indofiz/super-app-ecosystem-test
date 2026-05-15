@@ -1,9 +1,12 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import 'l10n/app_localizations.dart';
 import 'core/config/app_config.dart';
 import 'core/http/api_client.dart';
+import 'core/logging/error_reporter.dart';
 import 'core/router/app_router.dart';
 import 'features/auth/domain/auth_repository.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
@@ -38,6 +41,21 @@ class _SmartAppState extends State<SmartApp> {
   @override
   void initState() {
     super.initState();
+
+    // audit-004 C-04: replace the default Flutter red/grey error box.
+    // Errors thrown inside any descendant widget's build() are caught by
+    // FlutterError.reportError and routed here. In debug we keep the
+    // default red box so devs see the failure immediately; in release we
+    // render a friendly localised tile with a reload affordance and
+    // forward the details to ErrorReporter.
+    ErrorWidget.builder = (FlutterErrorDetails details) {
+      ErrorReporter.instance.reportFlutterError(details);
+      if (kDebugMode) {
+        return ErrorWidget(details.exception);
+      }
+      return _ReleaseErrorTile(router: _router.config);
+    };
+
     _authBloc = AuthBloc(authRepository: widget.authRepository)
       ..add(const AuthStarted());
     _authListenable = AuthBlocListenable(_authBloc);
@@ -80,6 +98,62 @@ class _SmartAppState extends State<SmartApp> {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           routerConfig: _router.config,
+        ),
+      ),
+    );
+  }
+}
+
+/// Release-build fallback for [ErrorWidget.builder]. Replaces the broken
+/// subtree with a card the user can read and act on. Localised via
+/// [AppLocalizations] — this runs inside a mounted [MaterialApp] so the
+/// delegates are available.
+class _ReleaseErrorTile extends StatelessWidget {
+  const _ReleaseErrorTile({required this.router});
+
+  final GoRouter router;
+
+  @override
+  Widget build(BuildContext context) {
+    // `Localizations.of` requires a Material/Widgets context. ErrorWidget
+    // is rendered as a direct child of whatever was building when the
+    // exception fired, so the inherited widget chain is intact.
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.errorContainer.withValues(alpha: 0.4),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              color: theme.colorScheme.error,
+              size: 32,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              l10n.errorWidgetMessage,
+              style: theme.textTheme.bodyMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: () {
+                // Re-enter the current route so the broken subtree is
+                // rebuilt from scratch. If the failure is deterministic
+                // it will re-throw — but at least the user has the same
+                // affordance any web page offers.
+                final location =
+                    router.routerDelegate.currentConfiguration.uri.toString();
+                router.go(location);
+              },
+              icon: const Icon(Icons.refresh),
+              label: Text(l10n.errorWidgetReload),
+            ),
+          ],
         ),
       ),
     );

@@ -69,4 +69,16 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get verifyUnknown => 'Terjadi kesalahan tak terduga.';
+
+  @override
+  String get errorWidgetMessage => 'Terjadi kesalahan pada bagian ini.';
+
+  @override
+  String get errorWidgetReload => 'Muat Ulang';
+
+  @override
+  String get authRetryHint => 'Silakan coba lagi.';
+
+  @override
+  String get authPermanentHint => 'Jika masalah berlanjut, hubungi bantuan.';
 }

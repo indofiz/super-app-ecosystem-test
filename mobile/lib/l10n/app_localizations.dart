@@ -211,6 +211,30 @@ abstract class AppLocalizations {
   /// In id, this message translates to:
   /// **'Terjadi kesalahan tak terduga.'**
   String get verifyUnknown;
+
+  /// Shown by ErrorWidget.builder in release when a widget's build() throws.
+  ///
+  /// In id, this message translates to:
+  /// **'Terjadi kesalahan pada bagian ini.'**
+  String get errorWidgetMessage;
+
+  /// Action on the release-mode ErrorWidget tile that re-enters the current route.
+  ///
+  /// In id, this message translates to:
+  /// **'Muat Ulang'**
+  String get errorWidgetReload;
+
+  /// Hint shown under a retryable auth error on the login screen (audit-004 M-02).
+  ///
+  /// In id, this message translates to:
+  /// **'Silakan coba lagi.'**
+  String get authRetryHint;
+
+  /// Hint shown under a non-retryable auth error on the login screen (audit-004 M-02).
+  ///
+  /// In id, this message translates to:
+  /// **'Jika masalah berlanjut, hubungi bantuan.'**
+  String get authPermanentHint;
 }
 
 class _AppLocalizationsDelegate

@@ -25,5 +25,11 @@
   "verifyNotAuthenticated": "You are not signed in.",
   "verifyPhoneNotEntered": "Please enter your WhatsApp number first.",
   "verifyNetwork": "Could not connect. Check your internet connection.",
-  "verifyUnknown": "An unexpected error occurred."
+  "verifyUnknown": "An unexpected error occurred.",
+
+  "errorWidgetMessage": "Something went wrong here.",
+  "errorWidgetReload": "Reload",
+
+  "authRetryHint": "Please try again.",
+  "authPermanentHint": "If the problem persists, contact support."
 }

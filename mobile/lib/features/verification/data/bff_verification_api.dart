@@ -3,7 +3,8 @@ import 'package:dio/dio.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/network/bff_parse.dart';
 import '../../../core/network/cancelled_exception.dart';
-import '../../../core/network/dio_factory.dart';
+import '../../../core/network/dio_factory.dart'
+    show createDio, kHttpReceiveTimeoutSlow;
 import '../../../core/network/logging_interceptor.dart';
 import '../../../core/network/retry_interceptor.dart';
 import '../../auth/data/dto/send_otp_response_dto.dart';
@@ -39,7 +40,13 @@ class BffVerificationApi {
               extraHeaders: const {'Content-Type': 'application/json'},
               withRetry: true,
             ) {
-    _dio.interceptors.add(httpLoggingInterceptor('verify', logErrorBody: true));
+    // audit-004 H-03: log only the BFF envelope discriminators
+    // (`error` + `attempts_left`), never the full body. The verify-OTP
+    // path is the worst offender — `error_description` echoes the user's
+    // typed code on a few error_code paths.
+    _dio.interceptors.add(
+      httpLoggingInterceptor('verify', logBffErrorEnvelope: true),
+    );
   }
 
   final AppConfig config;
@@ -68,6 +75,9 @@ class BffVerificationApi {
           options: Options(
             headers: {'Authorization': 'Bearer $bearer'},
             extra: const {RetryInterceptor.kNoRetryExtra: true},
+            // audit-004 M-03: SMTP delivery can take >15 s under load.
+            receiveTimeout: kHttpReceiveTimeoutSlow,
+            sendTimeout: kHttpReceiveTimeoutSlow,
           ),
           cancelToken: cancel,
         );
@@ -119,6 +129,10 @@ class BffVerificationApi {
           options: Options(
             headers: {'Authorization': 'Bearer $bearer'},
             extra: const {RetryInterceptor.kNoRetryExtra: true},
+            // audit-004 M-03: Fonnte's p99 exceeds 20 s during carrier
+            // saturation. A 15 s cap surfaces a delivered OTP as failure.
+            receiveTimeout: kHttpReceiveTimeoutSlow,
+            sendTimeout: kHttpReceiveTimeoutSlow,
           ),
           cancelToken: cancel,
         );

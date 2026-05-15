@@ -18,6 +18,16 @@ const Duration kHttpConnectTimeout = Duration(seconds: 10);
 const Duration kHttpReceiveTimeout = Duration(seconds: 15);
 const Duration kHttpSendTimeout = Duration(seconds: 15);
 
+/// audit-004 M-03: long-running endpoints — specifically
+/// `/auth/{email,phone}/send-otp` — synchronously dispatch to Fonnte
+/// (WhatsApp) / SMTP and only return after the third-party hands back a
+/// delivery receipt. Fonnte's documented p95 is 6-8 s with p99 > 20 s
+/// during regional carrier saturation, so a 15 s receive cap would abort
+/// the client while the BFF and Fonnte are still completing the delivery
+/// — the user sees "Gagal mengirim OTP" while the OTP buzzes on their
+/// phone. Per-call timeout override via `Options(receiveTimeout: …)`.
+const Duration kHttpReceiveTimeoutSlow = Duration(seconds: 30);
+
 /// Constructs a [Dio] with the timeouts and base URL every HTTP call in this
 /// app shares. Interceptors (auth, refresh, logging) are deliberately NOT
 /// attached here — each caller layers on what it needs.

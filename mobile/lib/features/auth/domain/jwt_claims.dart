@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart';
+
 import '../../../core/jwt/jwt_codec.dart';
 import '../../../core/logging/auth_log.dart';
+import '../../../core/logging/error_reporter.dart';
 
 /// Pure helper for reading the BFF-minted internal JWT.
 ///
@@ -37,7 +40,15 @@ class JwtClaims {
   factory JwtClaims.fromToken(String jwt) {
     final parts = jwt.split('.');
     if (parts.length < 2) {
+      // audit-004 M-01: the fail-closed path is correct, but the failure
+      // must reach the C-01 sink so a BFF claim-shape rollout doesn't
+      // silently drop verified flags across the user base.
       authLog('jwt', 'decode failed: token has <2 segments');
+      ErrorReporter.instance.reportError(
+        StateError('JwtClaims: token has <2 segments'),
+        StackTrace.current,
+        context: 'jwt.parse',
+      );
       return JwtClaims.empty();
     }
 
@@ -46,12 +57,30 @@ class JwtClaims {
     final alg = (header?['alg'] as String? ?? '').toLowerCase().trim();
     if (alg == 'none' || alg.isEmpty) {
       authLog('jwt', 'REJECTED: token alg="$alg" — unsigned tokens are not accepted');
+      // audit-004 M-01 + M-06: dev/staging builds run `MockAuthRepository`
+      // which mints alg=none tokens on every login — reporting those would
+      // bury real signal. In release builds, an unsigned token at the
+      // parse boundary is a five-alarm fire (mis-shipped USE_MOCK_AUTH, or
+      // a downgrade attack against the BFF).
+      if (kReleaseMode) {
+        ErrorReporter.instance.reportError(
+          StateError('JwtClaims: unsigned token rejected (alg="$alg")'),
+          StackTrace.current,
+          context: 'jwt.alg-none',
+          fatal: true,
+        );
+      }
       return JwtClaims.empty();
     }
 
     final raw = decodeJwtSegment(parts[1]);
     if (raw == null) {
       authLog('jwt', 'decode failed: payload was not a JSON object');
+      ErrorReporter.instance.reportError(
+        StateError('JwtClaims: payload was not a JSON object'),
+        StackTrace.current,
+        context: 'jwt.parse',
+      );
       return JwtClaims.empty();
     }
     return JwtClaims(

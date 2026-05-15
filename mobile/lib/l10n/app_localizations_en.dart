@@ -73,4 +73,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get verifyUnknown => 'An unexpected error occurred.';
+
+  @override
+  String get errorWidgetMessage => 'Something went wrong here.';
+
+  @override
+  String get errorWidgetReload => 'Reload';
+
+  @override
+  String get authRetryHint => 'Please try again.';
+
+  @override
+  String get authPermanentHint => 'If the problem persists, contact support.';
 }

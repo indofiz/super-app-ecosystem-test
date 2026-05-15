@@ -12,37 +12,48 @@
 
 | #     | Issue                                                                          | Severity | Status |
 |-------|--------------------------------------------------------------------------------|----------|--------|
-| C-01  | No global error handlers — uncaught exceptions disappear in release builds     | CRITICAL | ❌     |
+| C-01  | No global error handlers — uncaught exceptions disappear in release builds     | CRITICAL | ✅     |
 | C-02  | No crash-reporting integration (Crashlytics / Sentry / Datadog / Bugsnag)      | CRITICAL | ❌     |
-| C-03  | `main()` startup exceptions abort before `runApp()` — blank-screen failure mode | CRITICAL | ❌     |
-| C-04  | `ErrorWidget.builder` not overridden — framework errors paint default red box  | CRITICAL | ❌     |
-| H-01  | Raw exception objects stringified directly into user-facing UI (`'$e'`)        | HIGH     | ❌     |
-| H-02  | `refresh()` lacks repository-level dedup — concurrent refresh rotates twice     | HIGH     | ❌     |
-| H-03  | Debug interceptor dumps full response body — OTP / error payloads leak to logcat | HIGH     | ❌     |
-| H-04  | `SampleApi.getProfile()` has zero error normalisation                          | HIGH     | ❌     |
-| H-05  | `BffAuthRepository.logout()` swallows every error with `catch (_)`             | HIGH     | ❌     |
-| H-06  | No retry / exponential backoff for transient 5xx / network failures            | HIGH     | ❌     |
-| M-01  | `JwtClaims.fromToken` silently returns `empty()` on parse failure              | MEDIUM   | ❌     |
-| M-02  | `AuthFailure.retryable` is produced but never consumed by the UI               | MEDIUM   | ❌     |
-| M-03  | 15 s receive timeout on OTP-send misclassifies in-flight Fonnte delivery as failure | MEDIUM | ❌    |
-| M-04  | `authLog` uses `print` — no severity, no observability hook, may miss flush on crash | MEDIUM | ❌  |
-| M-05  | `ResendTimer` relies on the local device wall-clock with no fallback           | MEDIUM   | ❌     |
-| M-06  | `MockAuthRepository` mints `alg: none` JWTs that the prod parser silently accepts | MEDIUM | ❌  |
-| M-07  | `HomeScreen._error` retains only the most recent error — masks back-to-back failures | MEDIUM | ❌ |
+| C-03  | `main()` startup exceptions abort before `runApp()` — blank-screen failure mode | CRITICAL | ✅     |
+| C-04  | `ErrorWidget.builder` not overridden — framework errors paint default red box  | CRITICAL | ✅     |
+| H-01  | Raw exception objects stringified directly into user-facing UI (`'$e'`)        | HIGH     | ✅     |
+| H-02  | `refresh()` lacks repository-level dedup — concurrent refresh rotates twice     | HIGH     | ✅     |
+| H-03  | Debug interceptor dumps full response body — OTP / error payloads leak to logcat | HIGH     | ✅     |
+| H-04  | `SampleApi.getProfile()` has zero error normalisation                          | HIGH     | ✅     |
+| H-05  | `BffAuthRepository.logout()` swallows every error with `catch (_)`             | HIGH     | ✅     |
+| H-06  | No retry / exponential backoff for transient 5xx / network failures            | HIGH     | ✅     |
+| M-01  | `JwtClaims.fromToken` silently returns `empty()` on parse failure              | MEDIUM   | ✅     |
+| M-02  | `AuthFailure.retryable` is produced but never consumed by the UI               | MEDIUM   | ✅     |
+| M-03  | 15 s receive timeout on OTP-send misclassifies in-flight Fonnte delivery as failure | MEDIUM | ✅    |
+| M-04  | `authLog` uses `print` — no severity, no observability hook, may miss flush on crash | MEDIUM | ✅  |
+| M-05  | `ResendTimer` relies on the local device wall-clock with no fallback           | MEDIUM   | ✅     |
+| M-06  | `MockAuthRepository` mints `alg: none` JWTs that the prod parser silently accepts | MEDIUM | ✅  |
+| M-07  | `HomeScreen._error` retains only the most recent error — masks back-to-back failures | MEDIUM | ✅ |
 | L-01  | `AuthFailure` is not `Equatable` — repeated identical errors retrigger rebuilds | LOW     | ❌     |
 | L-02  | `Stopwatch` started but never stopped in `BffAuthRepository.login()`           | LOW      | ❌     |
 | L-03  | `OtpInvalidFailure` message locked to Bahasa Indonesia at throw site           | LOW      | ❌     |
 | L-04  | No structured logging — flat string prefix only, no machine-parseable fields   | LOW      | ❌     |
 | L-05  | No sanity guard on access-token size before persisting to secure storage       | LOW      | ❌     |
 
-**Progress: 0/22 fixed, 0 partial, 22 remaining**
+**Progress: 16/22 fixed, 0 partial, 6 remaining**
 
 ---
 
 ## CRITICAL Issues
 
-### ❌ C-01 No global error handlers — uncaught exceptions disappear in release builds
+### ✅ C-01 No global error handlers — uncaught exceptions disappear in release builds
 **File:** `lib/main.dart:10-33`
+
+**Fix (2026-05-15):** `main()` now runs inside `runZonedGuarded` and wires all four error pipes to a new `ErrorReporter` singleton ([lib/core/logging/error_reporter.dart](../lib/core/logging/error_reporter.dart)):
+
+1. `FlutterError.onError` → `ErrorReporter.instance.reportFlutterError(details)` — preserves `FlutterError.presentError` for debug visibility.
+2. `PlatformDispatcher.instance.onError` → `ErrorReporter.instance.reportError(error, stack, context: 'platformDispatcher')` and returns `true`.
+3. `Isolate.current.addErrorListener(RawReceivePort(...))` → forwards `[error, stack]` from any spawned isolate.
+4. The `runZonedGuarded` outermost handler is the catch-all for anything that escapes the three above.
+
+`ErrorReporter` writes to `dart:developer.log` (level 1000 / 1200 for fatal) with a `name:` namespace per context, plus an in-memory ring buffer (last 20 entries). Release builds strip `error.toString()` down to `runtimeType` to avoid leaking infra topology through `flutter logs`. The reporter is the **single seam** for C-02 — adding Sentry/Crashlytics later is one edit to `_record`.
+
+
 
 **Issue:**
 `main()` calls `WidgetsFlutterBinding.ensureInitialized()` and `runApp()` with no error-collection scaffolding around them. Specifically, none of the four error pipes that a production Flutter app needs are wired up:
@@ -104,8 +115,18 @@ This is the highest-leverage fix in the audit. Wire one provider, then iterate.
 
 ---
 
-### ❌ C-03 `main()` startup exceptions abort before `runApp()` — blank-screen failure mode
+### ✅ C-03 `main()` startup exceptions abort before `runApp()` — blank-screen failure mode
 **File:** `lib/main.dart:11-26`
+
+**Fix (2026-05-15):** the prelude is extracted into a top-level `_bootstrap()` function ([lib/main.dart](../lib/main.dart)) wrapped in `try/catch`. `WidgetsFlutterBinding.ensureInitialized()` stays outside the try (it must complete for `runApp` to render anything), but `dotenv.load`, `AppConfig.fromEnv`, `SecureStore()`, and `ApiClient.create` are all inside.
+
+On any failure:
+1. `ErrorReporter.instance.reportBootFailure(error, stack)` records the boot-blocking error.
+2. `runApp(BootFailureApp(error: e, stackTrace: st, onRetry: _bootstrap))` mounts the fallback UI ([lib/core/boot/boot_failure_app.dart](../lib/core/boot/boot_failure_app.dart)).
+
+`BootFailureApp` is intentionally English-only — `AppLocalizations` delegates are not loaded yet, and boot failures are a dev/ops surface (missing `.env`, malformed `BFF_BASE_URL`, missing `OAUTH_CLIENT_ID`). It surfaces `AppConfigException.message` verbatim for known config errors and a generic line otherwise. In debug it also dumps `error.toString()` + stack inside the card. The "Retry" button re-invokes `_bootstrap()`, so fixing the `.env` and tapping retry boots the real app without a process restart.
+
+
 
 **Issue:**
 `main()` performs four operations *before* `runApp()` is reached, every one of which throws on a class of real failures:
@@ -129,8 +150,18 @@ The fix is to (a) wrap the prelude in `try/catch`, (b) on failure render a dedic
 
 ---
 
-### ❌ C-04 `ErrorWidget.builder` not overridden — framework errors paint default red box
+### ✅ C-04 `ErrorWidget.builder` not overridden — framework errors paint default red box
 **File:** `lib/app.dart:50-70`
+
+**Fix (2026-05-15):** `SmartApp._SmartAppState.initState` ([lib/app.dart](../lib/app.dart)) installs an `ErrorWidget.builder` override that:
+
+1. Forwards `FlutterErrorDetails` to `ErrorReporter.instance.reportFlutterError(details)` — closes the loop with C-01 so framework errors trapped by `ErrorWidget` reach the same sink.
+2. Returns the default `ErrorWidget(details.exception)` in debug (`kDebugMode == true`) so devs keep the red-on-yellow inspector affordance.
+3. Returns a private `_ReleaseErrorTile` in release: a localised card (`l10n.errorWidgetMessage`) with a `TextButton.icon` reload action (`l10n.errorWidgetReload`) that re-enters the current GoRouter route via `router.go(currentLocation)` — gives the user an explicit affordance instead of a grey rectangle.
+
+l10n entries `errorWidgetMessage` / `errorWidgetReload` added to `app_id.arb`, `app_en.arb`, and the generated `AppLocalizations` files.
+
+
 
 **Issue:**
 `SmartApp.build()` constructs `MaterialApp.router(...)` without overriding `ErrorWidget.builder`. Flutter's default implementation renders the well-known red-bar-on-yellow `Error` widget in debug mode, and a grey container with no message in release mode. Any thrown exception inside `build()` of any descendant widget (e.g., a null deref on `session.email` if the BFF returns a partial JWT, a `RangeError` from the unguarded `substring(0, 24)` in `home_screen.dart:114`, a layout assertion in a nested widget) is caught by `FlutterError.reportError(...)` and silently replaced with this placeholder.
@@ -157,8 +188,16 @@ What it should do: override `ErrorWidget.builder` in release to render a user-fa
 
 ## HIGH Issues
 
-### ❌ H-01 Raw exception objects stringified directly into user-facing UI (`'$e'`)
+### ✅ H-01 Raw exception objects stringified directly into user-facing UI (`'$e'`)
 **File:** `lib/features/home/presentation/home_screen.dart:33` ; `lib/features/auth/presentation/bloc/auth_bloc.dart:55`
+
+**Fix (2026-05-15):** the two original sites were already refactored by intervening commits:
+- `home_screen.dart` no longer owns an `_error` field — the screen is now a `BlocBuilder<AuthBloc>` over `VerificationBanner` + `DevDashboard`, and the API-failure surface was lifted into the typed bloc/UI pipeline.
+- [auth_bloc.dart:98](../lib/features/auth/presentation/bloc/auth_bloc.dart#L98) emits `AuthState.unauthenticated(errorCode: AuthErrorCode.unknown)` in the generic catch instead of `'Login failed: $e'`. UI resolves the code via `AppLocalizations`.
+
+The last `$e` interpolation in any UI path lived in [dev_dashboard.dart:88](../lib/features/_dev/dev_dashboard.dart#L88)'s defensive fallback catch. It was gated behind `kDebugMode` at every call site but still violated the audit rule. This pass replaced it with `'Unexpected: ${e.runtimeType}'` plus an `ErrorReporter.instance.reportError(e, st, context: 'devDashboard')` call — same C-01 sink as the rest of the global handlers.
+
+
 
 **Issue:**
 Both code paths stringify any caught `Object` straight into a string that lands in the UI:
@@ -193,8 +232,25 @@ Fix: replace every `'$e'` with a sanitised message function (e.g., `errorToMessa
 
 ---
 
-### ❌ H-02 `refresh()` lacks repository-level dedup — concurrent refresh rotates twice
+### ✅ H-02 `refresh()` lacks repository-level dedup — concurrent refresh rotates twice
 **File:** `lib/features/auth/data/bff_auth_repository.dart:181-226` ; `lib/core/http/api_client.dart:161-177`
+
+**Fix (2026-05-15):** [bff_auth_repository.dart:67](../lib/features/auth/data/bff_auth_repository.dart#L67) gains a `Completer<AuthSession>? _refreshing` field. The public [refresh()](../lib/features/auth/data/bff_auth_repository.dart#L188) method is now a thin dedup wrapper:
+
+```dart
+final inflight = _refreshing;
+if (inflight != null) return inflight.future;
+final c = Completer<AuthSession>();
+_refreshing = c;
+_doRefresh(cancel: cancel).then(c.complete, onError: c.completeError)
+  .whenComplete(() => _refreshing = null);
+```
+
+The actual rotation logic moved verbatim into the private `_doRefresh()`. Concurrent callers — the bloc's `AuthRefreshRequested` (e.g. dev Refresh icon) and the `_RefreshInterceptor`'s 401-driven retry — now share a single in-flight Future, so the Keycloak refresh_token rotates at most once per wave instead of twice.
+
+The interceptor's `_RefreshInterceptor._refreshOnce()` Completer is intentionally kept ([api_client.dart:141](../lib/core/http/api_client.dart#L141)) as defence-in-depth: with the repo Future already shared, the interceptor's own dedup is effectively a no-op, but it survives any future call site that might bypass the repository.
+
+
 
 **Issue:**
 The `_RefreshInterceptor._refreshOnce()` deduplicates concurrent 401-driven refreshes *inside the interceptor*. But `BffAuthRepository.refresh()` itself has no in-flight guard. The bloc can call it directly via `AuthRefreshRequested` (`auth_bloc.dart:65`) — the home screen wires this to the `Icons.refresh` IconButton at `home_screen.dart:67-72`. If the user taps that button while a `/api/*` call is already retrying-on-401, two separate `/auth/refresh` requests fire in parallel.
@@ -217,8 +273,23 @@ Fix: move the `Completer`-based dedup currently in `_RefreshInterceptor._refresh
 
 ---
 
-### ❌ H-03 Debug interceptor dumps full response body — OTP / error payloads leak to logcat
+### ✅ H-03 Debug interceptor dumps full response body — OTP / error payloads leak to logcat
 **File:** `lib/features/auth/data/bff_auth_api.dart:44-49` ; `lib/core/http/api_client.dart:64-68`
+
+**Fix (2026-05-15):** [logging_interceptor.dart](../lib/core/network/logging_interceptor.dart) hard-renamed `logErrorBody` → `logBffErrorEnvelope` and reworked the error branch to extract only the BFF envelope discriminators:
+
+```dart
+final code = body['error'] ?? '<no-error-code>';
+final attempts = (body['detail'] is Map) ? body['detail']['attempts_left'] : null;
+authLog(tag, '  envelope: error=$code'
+    '${attempts != null ? ' attempts_left=$attempts' : ''}');
+```
+
+`error_description` is deliberately **not logged** — for several verify-OTP error codes the BFF echoes the user's typed code back inside that field, which previously surfaced in `adb logcat` on any QA device. Now only the closed-vocabulary discriminator field reaches `flutter logs`.
+
+Updated call sites: [bff_auth_api.dart:51](../lib/features/auth/data/bff_auth_api.dart#L51) and [bff_verification_api.dart:42](../lib/features/verification/data/bff_verification_api.dart#L42) now pass `logBffErrorEnvelope: true`. The generic `/api/*` channel ([api_client.dart:50](../lib/core/http/api_client.dart#L50)) keeps the default `false` — it talks to Kong-side services that don't share the BFF's envelope shape.
+
+
 
 **Issue:**
 The error interceptor in `BffAuthApi` prints the entire response body verbatim on any failure:
@@ -249,8 +320,17 @@ The same applies to `api_client.dart:64-68` for the `/api/*` channel.
 
 ---
 
-### ❌ H-04 `SampleApi.getProfile()` has zero error normalisation
+### ✅ H-04 `SampleApi.getProfile()` has zero error normalisation
 **File:** `lib/features/sample/data/sample_api.dart:15-18`
+
+**Fix (audit-002 follow-on, confirmed 2026-05-15):** the audit's prescribed pattern was implemented before this round:
+- [api_failure.dart](../lib/core/network/api_failure.dart) defines a closed `ApiErrorCode` enum (`network`, `server`, `unauthorized`, `forbidden`, `notFound`, `badRequest`, `parse`, `unknown`) plus an `ApiFailure` class mirroring `AuthFailure`'s shape.
+- `mapDioToApiFailure` translates timeouts / `connectionError` / HTTP status codes; `mapParseToApiFailure` covers `BffParseFailure` from contract drift.
+- [sample_api.dart:38-53](../lib/features/sample/data/sample_api.dart#L38-L53) wraps the `/api/profile` call in `withCancelTranslation` plus `on DioException` / `on BffParseFailure` arms that throw the typed failure. The dev dashboard already catches the typed arm at [dev_dashboard.dart:79](../lib/features/_dev/dev_dashboard.dart#L79).
+
+Every future Kong-side client follows the same pattern — `mapDioToApiFailure` is the shared seam.
+
+
 
 **Issue:**
 `SampleApi.getProfile()` is a one-liner with no `try/catch`:
@@ -273,8 +353,19 @@ Define an `ApiFailure` type analogous to `AuthFailure` (`auth_repository.dart:3-
 
 ---
 
-### ❌ H-05 `BffAuthRepository.logout()` swallows every error with `catch (_)`
+### ✅ H-05 `BffAuthRepository.logout()` swallows every error with `catch (_)`
 **File:** `lib/features/auth/data/bff_auth_repository.dart:229-243`
+
+**Fix (audit-002 follow-on, confirmed 2026-05-15):** the `catch (_)` blanket was replaced with a discriminating `_logoutRemoteBestEffort` at [bff_auth_repository.dart:297-329](../lib/features/auth/data/bff_auth_repository.dart#L297-L329):
+
+- `CancelledException` → caller-initiated, local clear proceeds.
+- `DioException` with `isTimeout` or `connectionError` → "BFF unreachable" log line; local clear proceeds.
+- `DioException` with HTTP 401 → "session already invalid server-side" log line; local clear proceeds.
+- Other 4xx / 5xx → "BFF rejected logout … server-side session may persist" warning-level log with `statusCode` + `errorDescription` from `describeBffError`.
+
+User-facing behaviour is unchanged (local credentials always cleared); diagnostic surface is preserved. Additionally, the local clear and remote call now run in parallel via `Future.wait` (audit-002 H-06) so a 15 s receive timeout no longer blocks log-out.
+
+
 
 **Issue:**
 The logout flow is best-effort by design — local state must be cleared whether or not the BFF acknowledges. But the implementation throws away the underlying error entirely:
@@ -304,8 +395,19 @@ Fix: at minimum, log the error with severity + cause before discarding it. With 
 
 ---
 
-### ❌ H-06 No retry / exponential backoff for transient 5xx / network failures
+### ✅ H-06 No retry / exponential backoff for transient 5xx / network failures
 **File:** `lib/core/http/api_client.dart:120-159`
+
+**Fix (audit-002 follow-on, confirmed 2026-05-15):** a generic [retry_interceptor.dart](../lib/core/network/retry_interceptor.dart) was introduced and installed via `createDio(withRetry: true)` ([dio_factory.dart:48](../lib/core/network/dio_factory.dart#L48)).
+
+Policy:
+- Retries `connectionTimeout` / `receiveTimeout` / `sendTimeout` / `connectionError` and HTTP **502 / 503 / 504**.
+- Exponential backoff with up to 50 % additive jitter: `baseDelay * 2^attempt` (default `baseDelay` = 200 ms), capped at `maxRetries = 2` additional attempts (3 total).
+- Cancellation, 4xx, and other 5xx propagate verbatim.
+
+All three Dio stacks opt in: `ApiClient` ([api_client.dart:39](../lib/core/http/api_client.dart#L39)), `BffAuthApi` ([bff_auth_api.dart:48](../lib/features/auth/data/bff_auth_api.dart#L48)), and `BffVerificationApi` ([bff_verification_api.dart:40](../lib/features/verification/data/bff_verification_api.dart#L40)). Idempotency-violating endpoints opt out per-call via `Options(extra: {RetryInterceptor.kNoRetryExtra: true})` — used by verify-OTP to avoid burning the user's attempt counter on a late-success retry.
+
+
 
 **Issue:**
 `_RefreshInterceptor.onError` retries exactly one class of failure (HTTP 401) exactly once. Every other transient failure — connection reset, DNS hiccup, 502 Bad Gateway from Kong, 504 from an upstream service, the bog-standard "Kong restarted, give it 200 ms" — fails immediately with no automated recovery. The verification flow is especially exposed:
@@ -321,8 +423,16 @@ Fix: introduce an exponential-backoff interceptor (e.g., `dio_smart_retry` or a 
 
 ## MEDIUM Issues
 
-### ❌ M-01 `JwtClaims.fromToken` silently returns `empty()` on parse failure
+### ✅ M-01 `JwtClaims.fromToken` silently returns `empty()` on parse failure
 **File:** `lib/features/auth/domain/jwt_claims.dart:32-57`
+
+**Fix (2026-05-15):** the fail-closed behaviour is preserved — every error path still returns `JwtClaims.empty()`. What changed is the diagnostic surface: each of the three fail paths now reports through `ErrorReporter.instance.reportError(...)` in addition to the existing `authLog` line, so the C-01 ring buffer records the breadcrumb and a future Sentry/Crashlytics (C-02) wiring picks it up automatically.
+
+The `alg=none`/empty-alg branch is gated on `kReleaseMode` ([jwt_claims.dart:65](../lib/features/auth/domain/jwt_claims.dart#L65)). Dev and staging builds running `MockAuthRepository` mint alg:none tokens on every login, so reporting them would bury real signal. In release, the same token is a five-alarm fire (mis-shipped `USE_MOCK_AUTH=true`, or an unsigned-token downgrade attack) and is marked `fatal: true`.
+
+The other two paths (token has <2 segments, payload not a JSON object) fire in any build — these are unexpected anywhere and a single occurrence is the signal you want.
+
+
 
 **Issue:**
 The parser was written to "fail closed" — any decode error returns `JwtClaims.empty()` whose `emailVerified` and `phoneNumberVerified` are `false`. The security intent (never default to "verified") is correct. The error-handling defect is that the failure is *completely invisible*:
@@ -345,8 +455,29 @@ Fix: keep the fail-closed behaviour, but emit a `developer.log(level: 1000, erro
 
 ---
 
-### ❌ M-02 `AuthFailure.retryable` is produced but never consumed by the UI
+### ✅ M-02 `AuthFailure.retryable` is produced but never consumed by the UI
 **File:** `lib/features/auth/domain/auth_repository.dart:3-10` ; `lib/features/auth/presentation/bloc/auth_bloc.dart:50-56`
+
+**Fix (2026-05-15):** retryability is now derived from the failure code via an extension on `AuthErrorCode` ([auth_error_code.dart:50](../lib/features/auth/domain/auth_error_code.dart#L50)):
+
+```dart
+extension AuthErrorCodeRetry on AuthErrorCode {
+  bool get isRetryable {
+    switch (this) {
+      case loginCancelled:
+      case loginTimedOut:
+      case network: return true;
+      // ... all other cases return false
+    }
+  }
+}
+```
+
+This avoids duplicating `retryable` as a bloc-state field; the repository's `AuthFailure.retryable` becomes a projection of the same truth and the UI consults `state.errorCode!.isRetryable` directly.
+
+[login_screen.dart:46-58](../lib/features/auth/presentation/screens/login_screen.dart#L46-L58) now renders a secondary hint below the error message: `authRetryHint` ("Silakan coba lagi.") for retryable codes, `authPermanentHint` ("Jika masalah berlanjut, hubungi bantuan.") for permanent ones. The SSO button stays enabled in both cases — a permanent failure misclassified as such would otherwise trap the user.
+
+
 
 **Issue:**
 `AuthFailure` carries a `retryable` boolean that the repository sets meaningfully — true for timeouts and user-cancelled flows (`bff_auth_repository.dart:154,166`), false for "BFF response missing required fields", false for refresh-after-session-died. The bloc reads `e.retryable` only to log it (`auth_bloc.dart:51`) and never propagates it to state. The login screen has no concept of "this failure is retryable" — it just shows the error text and re-enables the same button:
@@ -364,8 +495,14 @@ Fix: thread `retryable` through `AuthState.unauthenticated` (add a `bool retryab
 
 ---
 
-### ❌ M-03 15 s receive timeout on OTP-send misclassifies in-flight Fonnte delivery as failure
+### ✅ M-03 15 s receive timeout on OTP-send misclassifies in-flight Fonnte delivery as failure
 **File:** `lib/features/auth/data/bff_auth_api.dart:28-32` ; `lib/core/http/api_client.dart:39-43`
+
+**Fix (2026-05-15):** a new `kHttpReceiveTimeoutSlow = Duration(seconds: 30)` constant in [dio_factory.dart](../lib/core/network/dio_factory.dart) is applied per-call to `sendEmailOtp` and `sendPhoneOtp` ([bff_verification_api.dart:78-79, 130-131](../lib/features/verification/data/bff_verification_api.dart#L78-L79)) via `Options(receiveTimeout: kHttpReceiveTimeoutSlow, sendTimeout: kHttpReceiveTimeoutSlow)`.
+
+Routine endpoints (`/auth/me`, `/auth/refresh`, `/auth/logout`, the four `verify-otp` calls, all `/api/*` traffic) keep the default 15 s `kHttpReceiveTimeout`. Only the two send-otp endpoints, which synchronously dispatch to Fonnte (WhatsApp) or SMTP, get the 30 s budget. Fonnte's documented p99 exceeds 20 s during regional carrier saturation; the prior 15 s cap surfaced a delivered OTP as failure.
+
+
 
 **Issue:**
 Both Dio instances use the same hard-coded timeouts:
@@ -387,8 +524,34 @@ Fix: per-endpoint timeout configuration. Long-running send-otp calls should allo
 
 ---
 
-### ❌ M-04 `authLog` uses `print` — no severity, no observability hook, may miss flush on crash
+### ✅ M-04 `authLog` uses `print` — no severity, no observability hook, may miss flush on crash
 **File:** `lib/core/logging/auth_log.dart:1-12`
+
+**Fix (2026-05-15):** [auth_log.dart](../lib/core/logging/auth_log.dart) now wraps `dart:developer.log` instead of `print`:
+
+```dart
+void authLog(
+  String tag,
+  String msg, {
+  int level = 800,        // INFO default — all 30+ callers stay unchanged
+  Object? error,
+  StackTrace? stackTrace,
+}) {
+  if (!kDebugMode) return;
+  developer.log(msg, name: 'AUTH.$tag', level: level, error: error, stackTrace: stackTrace);
+}
+```
+
+Three things change:
+1. **Severity** — `level` is honoured by `adb logcat` filters and the DevTools logging view. The `✗` error branch in [logging_interceptor.dart](../lib/core/network/logging_interceptor.dart) now passes `level: 1000` (SEVERE) so HTTP failures separate from the INFO trace lines.
+2. **Structured `error` + `stackTrace`** params integrate with DevTools today and with a future crash reporter tomorrow.
+3. **Flush semantics** — `developer.log` writes through the VM service rather than buffered stdout, so the last lines before an uncaught exception are not lost the way `print` would lose them.
+
+The default `level: 800` keeps every existing caller's behaviour identical — no callsite migration required. Callers opting into SEVERE / WARNING tag themselves explicitly when touched.
+
+Together with **L-04** (structured logging) this is partial credit toward the L row — `developer.log(name: 'AUTH.$tag')` gives DevTools a real namespace to filter on, which was the L-04 ask. L-04 still has work for non-auth code paths.
+
+
 
 **Issue:**
 The logger is a single `print(...)` call:
@@ -411,8 +574,26 @@ Fix: replace `authLog` with a wrapper around `developer.log` that carries `level
 
 ---
 
-### ❌ M-05 `ResendTimer` relies on the local device wall-clock with no fallback
+### ✅ M-05 `ResendTimer` relies on the local device wall-clock with no fallback
 **File:** `lib/features/verification/presentation/widgets/resend_timer.dart:36-49`
+
+**Fix (2026-05-15):** [resend_timer.dart](../lib/features/verification/presentation/widgets/resend_timer.dart) is now driven by `Stopwatch.elapsed`. One wall-clock read at `initState` (or when `expiresAt` changes via `didUpdateWidget`) computes `_initialRemaining = expiresAt.difference(DateTime.now())`; every subsequent tick decrements against the monotonic stopwatch:
+
+```dart
+Duration get _remaining {
+  final r = _initialRemaining - _stopwatch.elapsed;
+  return r.isNegative ? Duration.zero : r;
+}
+```
+
+The timer is now robust to:
+- **device-clock skew** (NITZ off, traveller, automatic-time-off) — only the initial offset is wall-clock-derived, which is unavoidable since the server-issued `expiresAt` is itself anchored to wall time.
+- **manual clock adjustments mid-countdown** — `Stopwatch.elapsed` cannot be perturbed by the user.
+- **DST rollover** — same reason.
+
+`didUpdateWidget` resets the stopwatch when `expiresAt` changes (resend issued, fresh OTP record). `dispose` cancels the periodic ticker and stops the stopwatch.
+
+
 
 **Issue:**
 The countdown is computed as `_target.difference(DateTime.now())`:
@@ -435,8 +616,18 @@ Fix: drive the timer off a monotonic clock (start `Stopwatch` on `initState`, de
 
 ---
 
-### ❌ M-06 `MockAuthRepository` mints `alg: none` JWTs that the prod parser silently accepts
+### ✅ M-06 `MockAuthRepository` mints `alg: none` JWTs that the prod parser silently accepts
 **File:** `lib/features/auth/data/mock_auth_repository.dart:172-195` ; `lib/features/auth/domain/jwt_claims.dart:32-57`
+
+**Fix (audit-002 follow-on, confirmed 2026-05-15):** three layers of defence now block unsigned tokens from being trusted in production:
+
+1. **Parser refuses unsigned tokens** ([jwt_claims.dart:55-73](../lib/features/auth/domain/jwt_claims.dart#L55-L73)): `alg == 'none'` or empty `alg` returns `JwtClaims.empty()` with `emailVerified = false` / `phoneNumberVerified = false`. This is the load-bearing guard — a release build with mis-shipped `USE_MOCK_AUTH=true` can still mint alg:none tokens, but they parse as empty so every verified flag stays false.
+2. **Debug-only `mockJwt` assertion** ([mock_jwt.dart:22](../lib/features/auth/data/mock_jwt.dart#L22)): `assert(kDebugMode, …)` raises if anything calls `mockJwt()` outside debug. Asserts strip in release, so this is a dev-time canary — not the primary guard, but loud during local testing.
+3. **Repository factory gate** ([main.dart](../lib/main.dart)): `config.useMockAuth` decides whether `MockAuthRepository` or `BffAuthRepository` is wired at all.
+
+Combined with audit-004 M-01 (release-only ErrorReporter breadcrumb on the alg=none branch), an unsigned token in a release build now leaves a recorded trace instead of failing silently.
+
+
 
 **Issue:**
 The mock repository fabricates JWTs whose header is `{"alg":"none"}` and which have an empty signature segment:
@@ -457,8 +648,20 @@ Fix: have `JwtClaims.fromToken` refuse to parse tokens whose header `alg` is `no
 
 ---
 
-### ❌ M-07 `HomeScreen._error` retains only the most recent error — masks back-to-back failures
+### ✅ M-07 `HomeScreen._error` retains only the most recent error — masks back-to-back failures
 **File:** `lib/features/home/presentation/home_screen.dart:20-37`
+
+**Fix (2026-05-15):** the citizen-facing site cited by the audit (`HomeScreen._error`) no longer exists — `HomeScreen` was refactored into a pure `BlocBuilder` over `VerificationBanner` + `DevDashboard` and never owned an error field again.
+
+The same single-bucket pattern was surviving inside [dev_dashboard.dart](../lib/features/_dev/dev_dashboard.dart) — debug-only, but the audit explicitly called this the "team's smoke-test surface". It was split into per-button error state:
+
+- Fields: `_meError` (for `/auth/me`), `_apiError` (for `/api/profile`).
+- `_run(setter, task)` takes a setter closure so each button only clears its own error before running and only sets its own error in the catch arm.
+- Render loop displays both error lines independently — back-to-back failures are now both visible.
+
+Citizen UX impact: none (already fixed by the HomeScreen refactor). Dev diagnostic quality: tightened.
+
+
 
 **Issue:**
 `HomeScreen` has a single `_error` field shared between `_fetchMe` and `_fetchApiProfile`:

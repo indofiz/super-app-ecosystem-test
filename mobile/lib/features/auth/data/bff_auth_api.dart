@@ -46,9 +46,13 @@ class BffAuthApi {
               extraHeaders: const {'Content-Type': 'application/json'},
               withRetry: true,
             ) {
-    // BFF error envelope is safe to log in debug — surfaces
-    // `error_description` and `detail.attempts_left` for the integration team.
-    _dio.interceptors.add(httpLoggingInterceptor('api', logErrorBody: true));
+    // audit-004 H-03: log only the BFF envelope discriminators
+    // (`error` + `attempts_left`), never the full body. `error_description`
+    // can echo user input (verify-OTP) and was previously visible to any
+    // adb-connected device.
+    _dio.interceptors.add(
+      httpLoggingInterceptor('api', logBffErrorEnvelope: true),
+    );
   }
 
   final AppConfig config;

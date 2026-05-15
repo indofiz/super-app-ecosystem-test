@@ -41,3 +41,30 @@ enum AuthErrorCode {
   /// Catch-all for everything we didn't recognise.
   unknown,
 }
+
+/// audit-004 M-02: derives retryability from the failure code rather than
+/// duplicating it as a separate field on `AuthState` / `AuthFailure`.
+/// Repository sites that set `AuthFailure.retryable` (e.g. timeouts at
+/// `bff_auth_repository.dart:158,166`) become the legacy projection of
+/// this; the UI consults `state.errorCode!.isRetryable` directly so the
+/// two cannot drift apart.
+extension AuthErrorCodeRetry on AuthErrorCode {
+  /// True for failures another attempt of the same flow — without user
+  /// re-input — might recover from. False for failures that require
+  /// either re-authentication or out-of-band intervention.
+  bool get isRetryable {
+    switch (this) {
+      case AuthErrorCode.loginCancelled:
+      case AuthErrorCode.loginTimedOut:
+      case AuthErrorCode.network:
+        return true;
+      case AuthErrorCode.sessionExpired:
+      case AuthErrorCode.loginPlatformError:
+      case AuthErrorCode.loginMissingFields:
+      case AuthErrorCode.notAuthenticated:
+      case AuthErrorCode.refreshFailed:
+      case AuthErrorCode.unknown:
+        return false;
+    }
+  }
+}

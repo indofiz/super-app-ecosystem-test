@@ -61,5 +61,17 @@
   "@verifyNetwork": { "description": "VerificationErrorCode.network" },
 
   "verifyUnknown": "Terjadi kesalahan tak terduga.",
-  "@verifyUnknown": { "description": "VerificationErrorCode.unknown" }
+  "@verifyUnknown": { "description": "VerificationErrorCode.unknown" },
+
+  "errorWidgetMessage": "Terjadi kesalahan pada bagian ini.",
+  "@errorWidgetMessage": { "description": "Shown by ErrorWidget.builder in release when a widget's build() throws." },
+
+  "errorWidgetReload": "Muat Ulang",
+  "@errorWidgetReload": { "description": "Action on the release-mode ErrorWidget tile that re-enters the current route." },
+
+  "authRetryHint": "Silakan coba lagi.",
+  "@authRetryHint": { "description": "Hint shown under a retryable auth error on the login screen (audit-004 M-02)." },
+
+  "authPermanentHint": "Jika masalah berlanjut, hubungi bantuan.",
+  "@authPermanentHint": { "description": "Hint shown under a non-retryable auth error on the login screen (audit-004 M-02)." }
 }

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../core/logging/error_reporter.dart';
 import '../../core/network/api_failure.dart';
 import '../../core/network/cancelled_exception.dart';
 import '../auth/domain/auth_repository.dart';
@@ -50,7 +51,14 @@ class DevDashboard extends StatefulWidget {
 class _DevDashboardState extends State<DevDashboard> {
   String? _meResult;
   String? _apiResult;
-  String? _error;
+  // audit-004 M-07: per-button error state. The original
+  // `HomeScreen._error` site has been refactored away (HomeScreen no
+  // longer owns an error field), but the same single-bucket pattern was
+  // surviving here on the team's smoke-test surface. Back-to-back
+  // failures used to overwrite each other; now each button keeps its own
+  // result and only its own catch arm sets it.
+  String? _meError;
+  String? _apiError;
   bool _busy = false;
 
   /// Cancels in-flight `/auth/me` + `/api/profile` calls on widget
@@ -65,10 +73,13 @@ class _DevDashboardState extends State<DevDashboard> {
     super.dispose();
   }
 
-  Future<void> _run(Future<void> Function() task) async {
+  Future<void> _run(
+    void Function(String?) setError,
+    Future<void> Function() task,
+  ) async {
     setState(() {
       _busy = true;
-      _error = null;
+      setError(null);
     });
     try {
       await task();
@@ -81,17 +92,22 @@ class _DevDashboardState extends State<DevDashboard> {
       // citizens) will resolve `f.code` via AppLocalizations. Showing
       // the diagnostic here is fine — this widget is gated behind
       // `kDebugMode` at every call site.
-      setState(() => _error = 'ApiFailure(${f.code.name})'
-          '${f.diagnostic != null ? ' — ${f.diagnostic}' : ''}');
-    } catch (e) {
+      setState(() => setError('ApiFailure(${f.code.name})'
+          '${f.diagnostic != null ? ' — ${f.diagnostic}' : ''}'));
+    } catch (e, st) {
+      // audit-004 H-01: don't interpolate `$e` into UI strings. With H-04
+      // in place every realistic failure surfaces as a typed arm above —
+      // this generic catch is defence-in-depth. Route the raw object
+      // through the C-01 sink so the failure is still recorded.
+      ErrorReporter.instance.reportError(e, st, context: 'devDashboard');
       if (!mounted) return;
-      setState(() => _error = '$e');
+      setState(() => setError('Unexpected: ${e.runtimeType}'));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _fetchMe() => _run(() async {
+  Future<void> _fetchMe() => _run((e) => _meError = e, () async {
         final repo = context.read<AuthRepository>();
         final profile = await repo.getProfile(cancel: _cancel);
         if (!mounted) return;
@@ -106,7 +122,7 @@ class _DevDashboardState extends State<DevDashboard> {
         });
       });
 
-  Future<void> _fetchApiProfile() => _run(() async {
+  Future<void> _fetchApiProfile() => _run((e) => _apiError = e, () async {
         final api = context.read<SampleApi>();
         final dto = await api.getProfile(cancel: _cancel);
         if (!mounted) return;
@@ -159,10 +175,17 @@ class _DevDashboardState extends State<DevDashboard> {
           const SizedBox(height: 16),
           const LinearProgressIndicator(),
         ],
-        if (_error != null) ...[
+        if (_meError != null) ...[
           const SizedBox(height: 16),
           Text(
-            _error!,
+            '/auth/me: ${_meError!}',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+        if (_apiError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            '/api/profile: ${_apiError!}',
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         ],

@@ -43,6 +43,19 @@ class LoginScreen extends StatelessWidget {
                             color: Theme.of(context).colorScheme.error),
                         textAlign: TextAlign.center,
                       ),
+                      const SizedBox(height: 6),
+                      // audit-004 M-02: surface retryability so the user
+                      // knows whether tapping the SSO button again is
+                      // useful (timeout / cancelled / network) or whether
+                      // they need out-of-band help (loginMissingFields,
+                      // sessionExpired-on-restore, refreshFailed).
+                      Text(
+                        state.errorCode!.isRetryable
+                            ? AppLocalizations.of(context).authRetryHint
+                            : AppLocalizations.of(context).authPermanentHint,
+                        style: Theme.of(context).textTheme.bodySmall,
+                        textAlign: TextAlign.center,
+                      ),
                       const SizedBox(height: 16),
                     ],
                     SizedBox(

@@ -53,6 +53,19 @@ class BffAuthRepository implements AuthRepository {
 
   final _controller = StreamController<AuthSession?>.broadcast();
 
+  /// audit-004 H-02: in-flight dedup at the repository layer. The bloc's
+  /// `AuthRefreshRequested` (e.g. the dev Refresh icon) and the
+  /// `_RefreshInterceptor`'s 401-driven retry can both invoke `refresh()`
+  /// concurrently. The BFF rotates the Keycloak refresh_token on each
+  /// call (§2.1), so two parallel rotations invalidate each other and
+  /// the loser's bearer 401s on the next request. Sharing one Completer
+  /// across concurrent callers means at most one rotation per "wave".
+  ///
+  /// The interceptor's own `_refreshOnce` Completer is kept as
+  /// defence-in-depth — when both layers have a dedup, the interceptor's
+  /// is effectively a no-op because the repo Future is already shared.
+  Completer<AuthSession>? _refreshing;
+
   @override
   Stream<AuthSession?> get sessionChanges => _controller.stream;
 
@@ -172,7 +185,32 @@ class BffAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AuthSession> refresh({CancelToken? cancel}) async {
+  Future<AuthSession> refresh({CancelToken? cancel}) {
+    // audit-004 H-02: share one in-flight refresh across concurrent
+    // callers. A second caller arriving while a refresh is already in
+    // flight awaits the same Future instead of triggering a second
+    // rotation. Note: a join-er's `cancel` token does not interrupt the
+    // shared refresh — matches the pre-existing interceptor dedup
+    // behaviour, since one tab's cancellation should not abort another's
+    // session restoration.
+    final inflight = _refreshing;
+    if (inflight != null) {
+      _log('refresh: joining in-flight refresh');
+      return inflight.future;
+    }
+    final c = Completer<AuthSession>();
+    _refreshing = c;
+    _doRefresh(cancel: cancel).then((session) {
+      _refreshing = null;
+      c.complete(session);
+    }, onError: (Object e, StackTrace st) {
+      _refreshing = null;
+      c.completeError(e, st);
+    });
+    return c.future;
+  }
+
+  Future<AuthSession> _doRefresh({CancelToken? cancel}) async {
     final stored = await _local.read();
     if (stored == null) {
       throw AuthFailure(code: AuthErrorCode.notAuthenticated);
