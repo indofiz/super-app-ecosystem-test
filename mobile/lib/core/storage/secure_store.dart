@@ -26,7 +26,7 @@ class SecureStore {
   static const _kExpiresAt = 'expires_at';
 
   /// Largest access token we will ever write to EncryptedSharedPreferences.
-  /// A real BFF HS256 JWT tops out well under 2 KB; 16 KB gives generous
+  /// A real BFF RS256 JWT tops out well under 2 KB; 16 KB gives generous
   /// headroom while blocking a misrouted multi-MB HTML payload that would
   /// brick the Android keystore (non-deterministic failure above ~1 MB).
   static const int _kMaxAccessTokenLength = 16 * 1024;

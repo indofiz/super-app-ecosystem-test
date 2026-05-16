@@ -2,10 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_app_test/core/jwt/jwt_codec.dart';
 import 'package:smart_app_test/features/auth/domain/auth_session.dart';
 
-// Use HS256 so the alg-guard in JwtClaims.fromToken() accepts the token.
-// Signature verification is Kong's job; tests only exercise payload parsing.
+// Use RS256 (the real BFF alg) so the alg-guard in JwtClaims.fromToken()
+// accepts the token. Signature verification is Kong's job; tests only
+// exercise payload parsing.
 String _jwt(Map<String, dynamic> payload) {
-  final header = encodeJwtSegment({'alg': 'HS256', 'typ': 'JWT'});
+  final header = encodeJwtSegment({'alg': 'RS256', 'typ': 'JWT'});
   return '$header.${encodeJwtSegment(payload)}.fake-sig';
 }
 

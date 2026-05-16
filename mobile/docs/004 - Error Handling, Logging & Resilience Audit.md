@@ -756,7 +756,7 @@ Light-touch fix: keep the human-readable line but `developer.log` it with `name:
 ### ✅ L-05 No sanity guard on access-token size before persisting to secure storage
 **File:** `lib/core/storage/secure_store.dart:23-36`
 
-**Fix (2026-05-16):** `writeSession` now checks `session.accessToken.length > _kMaxAccessTokenLength` (16 384 chars) before any write. On violation: calls `ErrorReporter.instance.reportError(..., fatal: true)` then throws a `StateError` — nothing is written to `EncryptedSharedPreferences`. The 16 KB cap is ~8× larger than any real BFF HS256 JWT while blocking multi-MB accidents.
+**Fix (2026-05-16):** `writeSession` now checks `session.accessToken.length > _kMaxAccessTokenLength` (16 384 chars) before any write. On violation: calls `ErrorReporter.instance.reportError(..., fatal: true)` then throws a `StateError` — nothing is written to `EncryptedSharedPreferences`. The 16 KB cap is ~8× larger than any real BFF RS256 JWT while blocking multi-MB accidents.
 
 **Issue:**
 `writeSession` writes whatever `accessToken` string the caller passes:

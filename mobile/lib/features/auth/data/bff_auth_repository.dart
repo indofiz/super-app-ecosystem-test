@@ -30,7 +30,7 @@ final _log = authLogger('repo');
 ///
 /// Uses flutter_appauth pointed at BFF endpoints (NOT Keycloak directly).
 /// The BFF performs the OAuth/PKCE handshake with Keycloak, then mints a
-/// short-lived HS256 INTERNAL JWT that mobile carries as its Bearer.
+/// short-lived RS256 INTERNAL JWT that mobile carries as its Bearer.
 /// Keycloak's access_token never reaches this repository.
 ///
 /// The OAuth response from /auth/token is:

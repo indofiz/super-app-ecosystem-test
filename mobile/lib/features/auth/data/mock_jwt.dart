@@ -8,8 +8,9 @@ import '../../../core/jwt/jwt_codec.dart';
 /// Used by both [MockAuthRepository] (for login/refresh) and
 /// [MockVerificationRepository] (after a successful OTP verify, to
 /// re-mint with the flipped flag). The signature segment is empty —
-/// the real BFF signs with HS256; consumers of the mock never check
-/// signatures. NEVER hand this token to anything that does.
+/// the real BFF signs with RS256 (asymmetric; Kong verifies with the
+/// public key); consumers of the mock never check signatures. NEVER hand
+/// this token to anything that does.
 String mockJwt({
   required String sub,
   bool emailVerified = false,
