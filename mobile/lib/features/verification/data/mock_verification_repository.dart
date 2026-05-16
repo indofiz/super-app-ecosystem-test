@@ -59,20 +59,17 @@ class MockVerificationRepository implements VerificationRepository {
   }
 
   @override
-  Future<Duration> sendPhoneOtp(String phone, {CancelToken? cancel}) async {
+  Future<Duration> sendPhoneOtp({CancelToken? cancel}) async {
     await Future<void>.delayed(const Duration(milliseconds: 400));
-    // Cache the phone on the current session so a subsequent verify
-    // (which doesn't re-pass the number through the JWT) can use it.
-    await _reissue(phoneNumber: phone);
+    // audit-003 M-03: no phone passed in — mirrors the real BFF, which
+    // reads the citizen's number from the Keycloak profile. The mock
+    // session already carries `phone_number` (seeded at login), so there
+    // is nothing to cache here; verify just flips the verified flag.
     return kOtpDefaultTtl;
   }
 
   @override
-  Future<AuthSession> verifyPhoneOtp(
-    String phone,
-    String code, {
-    CancelToken? cancel,
-  }) async {
+  Future<AuthSession> verifyPhoneOtp(String code, {CancelToken? cancel}) async {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (code != '123456') {
       throw VerificationFailure(
@@ -81,7 +78,10 @@ class MockVerificationRepository implements VerificationRepository {
         retryable: true,
       );
     }
-    return _reissue(phoneNumber: phone, phoneNumberVerified: true);
+    // audit-003 M-03: no phone on the wire — mirror the real BFF, which
+    // resolves the bound number from its OTP record. sendPhoneOtp() cached
+    // it onto the session, so carry that forward (no override here).
+    return _reissue(phoneNumberVerified: true);
   }
 
   @override
@@ -94,7 +94,6 @@ class MockVerificationRepository implements VerificationRepository {
   /// via the auth side so listeners see it.
   Future<AuthSession> _reissue({
     bool? emailVerified,
-    String? phoneNumber,
     bool? phoneNumberVerified,
   }) async {
     final current = await _local.read();
@@ -109,7 +108,7 @@ class MockVerificationRepository implements VerificationRepository {
       accessToken: mockJwt(
         sub: sub,
         emailVerified: emailVerified ?? current.emailVerified,
-        phoneNumber: phoneNumber ?? current.phoneNumber,
+        phoneNumber: current.phoneNumber,
         phoneNumberVerified:
             phoneNumberVerified ?? current.phoneNumberVerified,
       ),

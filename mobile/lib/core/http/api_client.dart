@@ -6,6 +6,7 @@ import '../config/app_config.dart';
 import '../logging/auth_log.dart';
 import '../network/dio_factory.dart';
 import '../network/logging_interceptor.dart';
+import '../network/pretty_logging_interceptor.dart';
 import '../../features/auth/domain/auth_repository.dart';
 import '../../features/auth/domain/auth_session.dart';
 
@@ -48,6 +49,8 @@ class ApiClient {
       authRepository: authRepository,
     ));
     client.interceptors.add(httpLoggingInterceptor('http'));
+    final pretty = prettyHttpLoggingInterceptor(config);
+    if (pretty != null) client.interceptors.add(pretty);
     return ApiClient._(client, sub);
   }
 
@@ -71,8 +74,14 @@ class _AuthInterceptor extends Interceptor {
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    // audit-003 H-06: the session bearer is the single source of truth on
+    // the shared ApiClient.dio — always overwrite. Honouring a caller-set
+    // Authorization would let a buggy/compromised call site inject a
+    // different token (cross-tenant) or a stale cached one (retry logic)
+    // and silently win against the canonical session. A feature needing a
+    // different Authorization must use its own Dio, not this one.
     final bearer = _tokens.bearer;
-    if (bearer != null && !options.headers.containsKey('Authorization')) {
+    if (bearer != null) {
       options.headers['Authorization'] = 'Bearer $bearer';
     }
     handler.next(options);

@@ -27,8 +27,6 @@ String verificationErrorMessage(
       return l10n.verifyOtpExpired;
     case VerificationErrorCode.notAuthenticated:
       return l10n.verifyNotAuthenticated;
-    case VerificationErrorCode.phoneNotEntered:
-      return l10n.verifyPhoneNotEntered;
     case VerificationErrorCode.network:
       return l10n.verifyNetwork;
     case VerificationErrorCode.unknown:

@@ -5,6 +5,7 @@ import '../../../core/network/bff_parse.dart';
 import '../../../core/network/cancelled_exception.dart';
 import '../../../core/network/dio_factory.dart';
 import '../../../core/network/logging_interceptor.dart';
+import '../../../core/network/pretty_logging_interceptor.dart';
 import 'dto/me_response_dto.dart';
 import 'dto/refresh_response_dto.dart';
 
@@ -53,6 +54,8 @@ class BffAuthApi {
     _dio.interceptors.add(
       httpLoggingInterceptor('api', logBffErrorEnvelope: true),
     );
+    final pretty = prettyHttpLoggingInterceptor(config);
+    if (pretty != null) _dio.interceptors.add(pretty);
   }
 
   final AppConfig config;

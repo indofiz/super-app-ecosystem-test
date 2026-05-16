@@ -19,11 +19,11 @@ class EmailVerifyOtpRequested extends VerificationEvent {
   List<Object?> get props => [code];
 }
 
+/// audit-003 M-03: no payload. The BFF reads the citizen's number from
+/// their Keycloak profile (source of record, same as email), so the
+/// client never supplies one — there is no in-app phone-entry step.
 class PhoneSendOtpRequested extends VerificationEvent {
-  const PhoneSendOtpRequested(this.phone);
-  final String phone;
-  @override
-  List<Object?> get props => [phone];
+  const PhoneSendOtpRequested();
 }
 
 class PhoneVerifyOtpRequested extends VerificationEvent {

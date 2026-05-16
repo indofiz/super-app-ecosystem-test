@@ -79,6 +79,12 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
     _log('onStarted → authenticated (fresh local session)');
     emit(AuthState.authenticated(session));
+    // audit-003 C-05: the restored session's verified flags came from the
+    // unverified on-device JWT. Lift the UI immediately for responsiveness,
+    // then re-confirm against /auth/me in the background — the corrected
+    // session arrives via sessionChanges and `_onSessionChanged` reprojects
+    // it. Best-effort; failure leaves the JWT-decoded flags as a fallback.
+    unawaited(authRepository.confirmIdentity());
   }
 
   Future<void> _onLoginRequested(

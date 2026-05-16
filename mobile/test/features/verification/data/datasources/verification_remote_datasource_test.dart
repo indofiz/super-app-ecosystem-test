@@ -38,31 +38,28 @@ void main() {
     verify(() => api.verifyEmailOtp('b', '123456')).called(1);
   });
 
-  test('sendPhoneOtp threads bearer + phone through', () async {
+  test('sendPhoneOtp threads bearer through (no phone — M-03)', () async {
     const dto = SendOtpResponseDto(delivery: 'wa', expiresIn: 300);
-    when(() => api.sendPhoneOtp('b', '+62...')).thenAnswer((_) async => dto);
+    when(() => api.sendPhoneOtp('b')).thenAnswer((_) async => dto);
 
-    final result = await remote.sendPhoneOtp(bearer: 'b', phone: '+62...');
+    final result = await remote.sendPhoneOtp(bearer: 'b');
     expect(result, same(dto));
-    verify(() => api.sendPhoneOtp('b', '+62...')).called(1);
+    verify(() => api.sendPhoneOtp('b')).called(1);
   });
 
-  test('verifyPhoneOtp threads bearer + phone + code through', () async {
+  test('verifyPhoneOtp threads bearer + code through (no phone — M-03)',
+      () async {
     const dto = VerifyOtpResponseDto(
       accessToken: 'tok',
       sessionId: 'sid',
       expiresIn: 3600,
     );
-    when(() => api.verifyPhoneOtp('b', '+62...', '654321'))
+    when(() => api.verifyPhoneOtp('b', '654321'))
         .thenAnswer((_) async => dto);
 
-    final result = await remote.verifyPhoneOtp(
-      bearer: 'b',
-      phone: '+62...',
-      code: '654321',
-    );
+    final result = await remote.verifyPhoneOtp(bearer: 'b', code: '654321');
     expect(result, same(dto));
-    verify(() => api.verifyPhoneOtp('b', '+62...', '654321')).called(1);
+    verify(() => api.verifyPhoneOtp('b', '654321')).called(1);
   });
 
   test('dispose disposes the underlying API', () async {

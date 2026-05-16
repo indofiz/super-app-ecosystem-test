@@ -102,7 +102,12 @@ Future<void> _bootstrap() async {
     final AuthRepository authRepository;
     final VerificationRepository verificationRepository;
 
-    if (config.useMockAuth) {
+    // audit-003 M-01: gate the mock auth stack behind kDebugMode, not just
+    // the env flag. USE_MOCK_AUTH is read from the bundled .env asset,
+    // which a tampered/re-signed APK can rewrite — without this guard a
+    // release build could be flipped to the in-memory mock, producing a
+    // fully-authenticated session against no IdP.
+    if (kDebugMode && config.useMockAuth) {
       authRepository =
           MockAuthRepository(localDataSource: authLocalDataSource);
       verificationRepository = MockVerificationRepository(

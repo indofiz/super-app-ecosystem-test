@@ -57,6 +57,9 @@ void main() {
       build: () {
         final s = validSession();
         when(repo.restoreSession).thenAnswer((_) async => s);
+        // audit-003 C-05: cold start re-confirms identity via /auth/me in
+        // the background after lifting the restored session.
+        when(() => repo.confirmIdentity()).thenAnswer((_) async {});
         return AuthBloc(authRepository: repo);
       },
       act: (bloc) async {

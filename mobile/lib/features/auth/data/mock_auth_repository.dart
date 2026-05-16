@@ -53,7 +53,14 @@ class MockAuthRepository implements AuthRepository {
   Future<AuthSession> login() async {
     await Future<void>.delayed(const Duration(milliseconds: 600));
     final session = AuthSession.fromToken(
-      accessToken: mockJwt(sub: 'mock-user-${_rng.nextInt(9999)}'),
+      // audit-003 M-03: the mock mirrors the real BFF/Keycloak — the
+      // citizen's phone is on the profile from the start (unverified),
+      // so the phone OTP screen has a destination to show without the
+      // client ever supplying a number.
+      accessToken: mockJwt(
+        sub: 'mock-user-${_rng.nextInt(9999)}',
+        phoneNumber: '+6281234567890',
+      ),
       sessionId: _randomToken(32),
       expiresAt: DateTime.now().add(kMockSessionLifetime),
     );
@@ -113,6 +120,13 @@ class MockAuthRepository implements AuthRepository {
   Future<void> replaceSession(AuthSession session) async {
     await _local.write(session);
     _controller.add(session);
+  }
+
+  @override
+  Future<void> confirmIdentity() async {
+    // No-op for the mock: there is no BFF to re-confirm against, and the
+    // mock JWT's verified flags are already the authoritative source the
+    // verification mock mints from (audit-003 C-05).
   }
 
   @override

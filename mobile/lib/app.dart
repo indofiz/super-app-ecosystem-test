@@ -90,7 +90,10 @@ class _SmartAppState extends State<SmartApp> {
         value: _authBloc,
         child: MaterialApp.router(
           title: 'Smart App',
-          debugShowCheckedModeBanner: false,
+          // audit-003 L-01: keep the debug banner in non-release builds so
+          // QA/help-desk screenshots visibly distinguish a debug build
+          // (full logging, mock toggle reachable) from a real release.
+          debugShowCheckedModeBanner: !kReleaseMode,
           theme: ThemeData(
             colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1F4E8C)),
             useMaterial3: true,

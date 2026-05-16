@@ -8,9 +8,9 @@ import '../bff_verification_api.dart';
 ///
 /// Wraps [BffVerificationApi] so the repository depends on a data-source
 /// abstraction rather than on the HTTP wire detail. Stateless: callers
-/// pass the bearer (and the phone number, for the phone channel)
-/// explicitly. The repo holds the auth-side local data source and pipes
-/// the persisted bearer through here.
+/// pass the bearer explicitly (audit-003 M-03: no phone number — the BFF
+/// resolves it from the Keycloak profile). The repo holds the auth-side
+/// local data source and pipes the persisted bearer through here.
 ///
 /// Every method accepts an optional [CancelToken] (audit-002 H-02). The
 /// verification bloc holds a per-channel token; on bloc close those
@@ -39,18 +39,16 @@ class VerificationRemoteDataSource {
 
   Future<SendOtpResponseDto> sendPhoneOtp({
     required String bearer,
-    required String phone,
     CancelToken? cancel,
   }) =>
-      _api.sendPhoneOtp(bearer, phone, cancel: cancel);
+      _api.sendPhoneOtp(bearer, cancel: cancel);
 
   Future<VerifyOtpResponseDto> verifyPhoneOtp({
     required String bearer,
-    required String phone,
     required String code,
     CancelToken? cancel,
   }) =>
-      _api.verifyPhoneOtp(bearer, phone, code, cancel: cancel);
+      _api.verifyPhoneOtp(bearer, code, cancel: cancel);
 
   Future<void> dispose() => _api.dispose();
 }

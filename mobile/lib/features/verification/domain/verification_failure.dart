@@ -1,3 +1,5 @@
+import 'package:equatable/equatable.dart';
+
 /// Closed enumeration of verification-layer failures.
 ///
 /// Same contract as `AuthErrorCode`: data layer emits the code, presentation
@@ -27,11 +29,6 @@ enum VerificationErrorCode {
   /// user; bounce back to login.
   notAuthenticated,
 
-  /// VerificationBloc internal state — user tapped "Verifikasi" before
-  /// any phone OTP had been requested, so the bloc has no phone number
-  /// cached. Never raised from data; emitted by the bloc itself.
-  phoneNotEntered,
-
   /// Transport-level failure.
   network,
 
@@ -39,8 +36,9 @@ enum VerificationErrorCode {
   unknown,
 }
 
-class VerificationFailure implements Exception {
-  VerificationFailure({
+/// [cause] is excluded from equality — it is an opaque debugging handle.
+class VerificationFailure extends Equatable implements Exception {
+  const VerificationFailure({
     required this.code,
     this.attemptsLeft,
     this.diagnostic,
@@ -58,6 +56,9 @@ class VerificationFailure implements Exception {
   final String? diagnostic;
   final Object? cause;
   final bool retryable;
+
+  @override
+  List<Object?> get props => [code, attemptsLeft, diagnostic, retryable];
 
   @override
   String toString() =>

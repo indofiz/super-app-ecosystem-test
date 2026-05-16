@@ -24,11 +24,19 @@ class _EmailOtpScreenState extends State<EmailOtpScreen> {
   @override
   void initState() {
     super.initState();
-    // Fire-and-forget kickoff after the first frame so the bloc is
-    // available via context. Idempotent on the BFF — if a prior code is
-    // still valid, the server overwrites it, which is fine here.
+    // audit-003 M-02: only auto-send when this channel has nothing in
+    // flight or awaiting entry. The VerificationBloc is shared across the
+    // whole /verify shell, so navigating back to /verify and re-entering
+    // /verify/email must NOT fire a fresh send-OTP against a live code —
+    // that let a crafted "reopen this route" deeplink pump unbounded
+    // OTP-send requests at a victim (SMS/email-bombing). Manual resend
+    // stays available via the ResendTimer.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<VerificationBloc>().add(const EmailSendOtpRequested());
+      if (!mounted) return;
+      final email = context.read<VerificationBloc>().state.email;
+      if (email.status == ChannelStatus.idle) {
+        context.read<VerificationBloc>().add(const EmailSendOtpRequested());
+      }
     });
   }
 

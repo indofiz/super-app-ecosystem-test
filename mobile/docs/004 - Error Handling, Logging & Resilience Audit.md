@@ -29,13 +29,13 @@
 | M-05  | `ResendTimer` relies on the local device wall-clock with no fallback           | MEDIUM   | ✅     |
 | M-06  | `MockAuthRepository` mints `alg: none` JWTs that the prod parser silently accepts | MEDIUM | ✅  |
 | M-07  | `HomeScreen._error` retains only the most recent error — masks back-to-back failures | MEDIUM | ✅ |
-| L-01  | `AuthFailure` is not `Equatable` — repeated identical errors retrigger rebuilds | LOW     | ❌     |
-| L-02  | `Stopwatch` started but never stopped in `BffAuthRepository.login()`           | LOW      | ❌     |
-| L-03  | `OtpInvalidFailure` message locked to Bahasa Indonesia at throw site           | LOW      | ❌     |
-| L-04  | No structured logging — flat string prefix only, no machine-parseable fields   | LOW      | ❌     |
-| L-05  | No sanity guard on access-token size before persisting to secure storage       | LOW      | ❌     |
+| L-01  | `AuthFailure` is not `Equatable` — repeated identical errors retrigger rebuilds | LOW     | ✅     |
+| L-02  | `Stopwatch` started but never stopped in `BffAuthRepository.login()`           | LOW      | ✅     |
+| L-03  | `OtpInvalidFailure` message locked to Bahasa Indonesia at throw site           | LOW      | ✅     |
+| L-04  | No structured logging — flat string prefix only, no machine-parseable fields   | LOW      | ✅     |
+| L-05  | No sanity guard on access-token size before persisting to secure storage       | LOW      | ✅     |
 
-**Progress: 16/22 fixed, 0 partial, 6 remaining**
+**Progress: 21/22 fixed, 0 partial, 1 remaining (C-02 deferred indefinitely)**
 
 ---
 
@@ -695,24 +695,30 @@ Fix: per-action error state (`_meError` / `_apiError`), or keep an error list an
 
 ## LOW Issues
 
-### ❌ L-01 `AuthFailure` is not `Equatable` — repeated identical errors retrigger rebuilds
+### ✅ L-01 `AuthFailure` is not `Equatable` — repeated identical errors retrigger rebuilds
 **File:** `lib/features/auth/domain/auth_repository.dart:3-36`
+
+**Fix (2026-05-16):** `AuthFailure` and `VerificationFailure` both now `extend Equatable`. Props: `[code, diagnostic, retryable]` for `AuthFailure`; `[code, attemptsLeft, diagnostic, retryable]` for `VerificationFailure`. `cause` is excluded — it is an opaque `Object?` debug handle that cannot be compared by value. Constructors are `const` to satisfy `@immutable`. No runtime behavior change (Bloc states already use the enum codes in their own `props`, not the failure objects); pays off in unit tests that compare thrown exceptions by value.
 
 **Issue:**
 `AuthFailure`, `OtpInvalidFailure`, and `OtpExpiredFailure` use the default `Object.==`, which is reference equality. The bloc emits `AuthState.unauthenticated(errorMessage: e.message)` (`auth_bloc.dart:73`); the state itself is `Equatable` and compares `errorMessage` by value, so identical strings are deduplicated correctly *at the state level*. The defect is downstream: if a feature ever surfaces `AuthFailure` instances directly (e.g., a future `errorObject` field, or a comparison in a test), two failures with identical message + retryable + cause are not `==`. The verification bloc already side-steps this by extracting `.message` into the channel state, so the bug is latent rather than active. Worth tidying when next touching the file.
 
 ---
 
-### ❌ L-02 `Stopwatch` started but never stopped in `BffAuthRepository.login()`
+### ✅ L-02 `Stopwatch` started but never stopped in `BffAuthRepository.login()`
 **File:** `lib/features/auth/data/bff_auth_repository.dart:93-178`
+
+**Fix (2026-05-16):** Added `stopwatch.stop()` on the success path immediately before the final timing log line. The error/throw paths are unaffected — the stopwatch is abandoned when the exception propagates out of the stack frame.
 
 **Issue:**
 `login()` creates `final stopwatch = Stopwatch()..start();` at line 93 and reads `stopwatch.elapsedMilliseconds` at six log sites, but never calls `.stop()`. `Stopwatch` does not leak resources, but the pattern is misleading — `elapsedMilliseconds` keeps ticking past the `return` while the closure is still in scope. The success-path log line at line 146 reads timing correctly; the catch-block reads at 150/157/168/174 read after a thrown exception. Not a bug, just a code-smell that suggests the author wanted scoped timing and got something different. Replace with `final start = DateTime.now(); … DateTime.now().difference(start)` if scoped timing matters, or call `.stop()` at every exit.
 
 ---
 
-### ❌ L-03 `OtpInvalidFailure` message locked to Bahasa Indonesia at throw site
+### ✅ L-03 `OtpInvalidFailure` message locked to Bahasa Indonesia at throw site
 **File:** `lib/features/auth/domain/auth_repository.dart:15-36`
+
+**Fix (2026-05-16):** Already resolved in a prior refactor — no action needed. The current `VerificationFailure` carries a typed `VerificationErrorCode` enum and an `attemptsLeft: int?` field; all user-facing copy is resolved at the presentation layer via `AppLocalizations`. The embedded-string `OtpInvalidFailure` class cited by the audit no longer exists in the codebase.
 
 **Issue:**
 The failure types build their user-facing message in their constructors:
@@ -735,8 +741,10 @@ The Bahasa strings are baked in at throw time. If the app later adds i18n (Engli
 
 ---
 
-### ❌ L-04 No structured logging — flat string prefix only, no machine-parseable fields
+### ✅ L-04 No structured logging — flat string prefix only, no machine-parseable fields
 **File:** `lib/core/logging/auth_log.dart:1-12` (and every caller)
+
+**Fix (2026-05-16):** Resolved by M-04. `authLog` / `authLogger` now route through `dart:developer.log(name: 'AUTH.$tag', level: ...)`. DevTools and any future crash reporter have a real `name` namespace (`AUTH.repo`, `AUTH.verify`, etc.) to filter on. No `print()` or `debugPrint()` calls remain in `lib/`. The `level` parameter propagates severity to `adb logcat` and the DevTools logging view.
 
 **Issue:**
 All log output is unstructured strings like `[AUTH/repo] login: SUCCESS in 1234ms` — readable to humans, opaque to tooling. There is no JSON output, no event/level/context shape. When the team eventually pipes mobile logs into a log aggregator (Datadog, Logtail, CloudWatch), the ingest will be a regex parse against ad-hoc prefixes. Worse, the prefix collides with substring matches — `[AUTH/api]` and `[AUTH/repo]` are siblings but logically the same channel; filtering is by free-form string match.
@@ -745,8 +753,10 @@ Light-touch fix: keep the human-readable line but `developer.log` it with `name:
 
 ---
 
-### ❌ L-05 No sanity guard on access-token size before persisting to secure storage
+### ✅ L-05 No sanity guard on access-token size before persisting to secure storage
 **File:** `lib/core/storage/secure_store.dart:23-36`
+
+**Fix (2026-05-16):** `writeSession` now checks `session.accessToken.length > _kMaxAccessTokenLength` (16 384 chars) before any write. On violation: calls `ErrorReporter.instance.reportError(..., fatal: true)` then throws a `StateError` — nothing is written to `EncryptedSharedPreferences`. The 16 KB cap is ~8× larger than any real BFF HS256 JWT while blocking multi-MB accidents.
 
 **Issue:**
 `writeSession` writes whatever `accessToken` string the caller passes:

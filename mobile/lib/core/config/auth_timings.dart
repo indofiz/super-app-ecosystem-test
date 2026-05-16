@@ -25,3 +25,13 @@ const Duration kMockSessionLifetime = Duration(minutes: 5);
 
 /// Minimum interval between OTP resend taps in the UI.
 const Duration kOtpResendCooldown = Duration(seconds: 60);
+
+/// Refresh-skew window applied to `AuthSession.isExpired` (audit-003
+/// M-05). A session is treated as expired this far BEFORE its nominal
+/// `expiresAt`, so the bloc proactively refreshes instead of firing a
+/// request with a bearer that dies in transit. It also blunts the
+/// device-clock-backdating bypass: trusting `DateTime.now()` alone let a
+/// user hold the clock behind `expiresAt` and keep a stale session
+/// "valid" in the UI between API calls — the skew shrinks that window
+/// (the BFF/Kong server clock remains the real authority on `/api/*`).
+const Duration kSessionExpirySkew = Duration(seconds: 30);

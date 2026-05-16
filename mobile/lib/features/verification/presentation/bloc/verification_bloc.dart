@@ -54,8 +54,8 @@ class VerificationBloc extends Bloc<VerificationEvent, VerificationState> {
   /// and the handler's catch arm skips emission so we don't `emit` on a
   /// closed bloc.
   ///
-  /// Per-channel granularity matters: the user can send email OTP and
-  /// type a phone number in parallel; we don't want a cancellation on
+  /// Per-channel granularity matters: the user can have an email OTP and
+  /// a phone OTP in flight in parallel; we don't want a cancellation on
   /// one channel to abort the other.
   final CancelToken _emailCancel = CancelToken();
   final CancelToken _phoneCancel = CancelToken();
@@ -81,13 +81,7 @@ class VerificationBloc extends Bloc<VerificationEvent, VerificationState> {
         emit: emit,
         getSlice: () => state.phone,
         putSlice: (s) => state.copyWith(phone: s),
-        send: () => verificationRepository.sendPhoneOtp(
-          event.phone,
-          cancel: _phoneCancel,
-        ),
-        // The phone channel caches the number on the slice so a
-        // subsequent verify call has it without a re-prompt.
-        phoneToCache: event.phone,
+        send: () => verificationRepository.sendPhoneOtp(cancel: _phoneCancel),
       );
 
   Future<void> _onVerifyEmail(
@@ -104,37 +98,24 @@ class VerificationBloc extends Bloc<VerificationEvent, VerificationState> {
         ),
       );
 
+  /// audit-003 M-03: structurally identical to [_onVerifyEmail]. The
+  /// phone never travels on the wire (not on send, not on verify); the
+  /// BFF resolves it from the Keycloak profile and from its own OTP
+  /// record. With no client-supplied number there is no binding for the
+  /// client to police, so the old `verifyingPhone` guard is gone.
   Future<void> _onVerifyPhone(
     PhoneVerifyOtpRequested event,
     Emitter<VerificationState> emit,
-  ) async {
-    // audit-002 H-07: verify against the phone the BFF has bound, not
-    // the most-recent pending value. The two used to be the same field
-    // (phoneNumber), so a future UI event mutating the pending phone
-    // without a re-send would have made the bloc verify against a
-    // number the BFF doesn't know.
-    final phone = state.phone.verifyingPhone;
-    if (phone == null) {
-      // User tapped verify before any successful sendPhoneOtp —
-      // UI-state guard, not a server failure. Doesn't reach the repo.
-      emit(state.copyWith(
-        phone: state.phone.copyWith(
-          errorCode: () => VerificationErrorCode.phoneNotEntered,
+  ) =>
+      _onVerify(
+        emit: emit,
+        getSlice: () => state.phone,
+        putSlice: (s) => state.copyWith(phone: s),
+        verify: () => verificationRepository.verifyPhoneOtp(
+          event.code,
+          cancel: _phoneCancel,
         ),
-      ));
-      return;
-    }
-    return _onVerify(
-      emit: emit,
-      getSlice: () => state.phone,
-      putSlice: (s) => state.copyWith(phone: s),
-      verify: () => verificationRepository.verifyPhoneOtp(
-        phone,
-        event.code,
-        cancel: _phoneCancel,
-      ),
-    );
-  }
+      );
 
   void _onErrorCleared(
     VerificationErrorCleared event,
@@ -155,23 +136,17 @@ class VerificationBloc extends Bloc<VerificationEvent, VerificationState> {
   // -------- shared state machines --------
 
   /// `sending → awaitingCode` on success; `idle + errorCode` on failure.
-  /// [phoneToCache], if supplied, is written to the slice's `phoneNumber`
-  /// field on both the in-flight and post-success emits, and to
-  /// [verifyingPhone] on the success emit only — see audit-002 H-07.
-  /// The two-field split means a future UI mutation of the pending phone
-  /// value (e.g. a hypothetical `PhoneNumberChanged` event) cannot
-  /// diverge "what we verify against" from "what the BFF actually bound".
+  /// Channel-agnostic: email and phone share this verbatim (audit-003
+  /// M-03 — neither channel carries an identifier; the BFF resolves the
+  /// destination from the Keycloak profile).
   Future<void> _onSend({
     required Emitter<VerificationState> emit,
     required _GetSlice getSlice,
     required _PutSlice putSlice,
     required Future<Duration> Function() send,
-    String? phoneToCache,
   }) async {
-    final cache = phoneToCache != null ? () => phoneToCache : null;
     emit(putSlice(getSlice().copyWith(
       status: ChannelStatus.sending,
-      phoneNumber: cache,
       errorCode: () => null,
       attemptsLeft: () => null,
     )));
@@ -179,10 +154,6 @@ class VerificationBloc extends Bloc<VerificationEvent, VerificationState> {
       final ttl = await send();
       emit(putSlice(getSlice().copyWith(
         status: ChannelStatus.awaitingCode,
-        phoneNumber: cache,
-        // Bind verifyingPhone only on a SUCCESSFUL send — if the BFF
-        // rejected the send, there is no server-side OTP record yet.
-        verifyingPhone: cache,
         expiresAt: () => DateTime.now().add(ttl),
       )));
     } on VerificationFailure catch (e) {
@@ -216,9 +187,6 @@ class VerificationBloc extends Bloc<VerificationEvent, VerificationState> {
         status: ChannelStatus.verified,
         errorCode: () => null,
         attemptsLeft: () => null,
-        // BFF-side OTP record consumed — clear the binding so a future
-        // verify can't reuse a phone the BFF no longer holds.
-        verifyingPhone: () => null,
       )));
     } on VerificationFailure catch (e) {
       final nextStatus = _statusForVerifyFailure(e);
@@ -230,14 +198,6 @@ class VerificationBloc extends Bloc<VerificationEvent, VerificationState> {
             e.code == VerificationErrorCode.otpExpired ? () => null : null,
         errorCode: () => e.code,
         attemptsLeft: () => e.attemptsLeft,
-        // When the failure drops us out of awaitingCode/verifying, the
-        // BFF-side record is gone (otpExpired, otpExhausted, transport
-        // error → user must resend). Clear verifyingPhone so the next
-        // send is required to re-bind. Retryable failures
-        // (otpInvalid + attempts remaining) keep awaitingCode, so the
-        // binding stays put.
-        verifyingPhone:
-            nextStatus == ChannelStatus.idle ? () => null : null,
       )));
     } on CancelledException {
       // Caller cancelled (bloc close) — skip emit.

@@ -91,15 +91,16 @@ class BffVerificationRepository implements VerificationRepository {
   }
 
   @override
-  Future<Duration> sendPhoneOtp(String phone, {CancelToken? cancel}) async {
+  Future<Duration> sendPhoneOtp({CancelToken? cancel}) async {
     final stored = await _local.read();
     if (stored == null) {
       throw VerificationFailure(code: VerificationErrorCode.notAuthenticated);
     }
     try {
+      // audit-003 M-03: no phone on the wire — the BFF resolves the
+      // citizen's number from their Keycloak profile, same as email.
       final res = await _remote.sendPhoneOtp(
         bearer: stored.accessToken,
-        phone: phone,
         cancel: cancel,
       );
       _log('sendPhoneOtp: delivery=${res.delivery ?? 'wa'} '
@@ -115,19 +116,17 @@ class BffVerificationRepository implements VerificationRepository {
   }
 
   @override
-  Future<AuthSession> verifyPhoneOtp(
-    String phone,
-    String code, {
-    CancelToken? cancel,
-  }) async {
+  Future<AuthSession> verifyPhoneOtp(String code, {CancelToken? cancel}) async {
     final stored = await _local.read();
     if (stored == null) {
       throw VerificationFailure(code: VerificationErrorCode.notAuthenticated);
     }
     try {
+      // audit-003 M-03: no `phone` on the wire — the BFF resolves the
+      // bound number from its own OTP record. The bearer + code are the
+      // only things the client asserts.
       final res = await _remote.verifyPhoneOtp(
         bearer: stored.accessToken,
-        phone: phone,
         code: code,
         cancel: cancel,
       );

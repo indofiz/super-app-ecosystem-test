@@ -1,7 +1,6 @@
 import 'package:dio/dio.dart';
 
 import '../config/app_config.dart';
-import 'pinned_http_adapter.dart';
 import 'retry_interceptor.dart';
 
 /// Default HTTP timeouts for all BFF/Kong calls.
@@ -56,12 +55,6 @@ Dio createDio({
   );
   if (withRetry) {
     dio.interceptors.add(RetryInterceptor(dio: dio));
-  }
-  // Install SPKI-hash pinning adapter when BFF_CERT_SHA256 is supplied at
-  // build time (release builds only). Returns null in debug / when no hash.
-  final pinnedAdapter = buildPinnedAdapter();
-  if (pinnedAdapter != null) {
-    dio.httpClientAdapter = pinnedAdapter;
   }
   return dio;
 }

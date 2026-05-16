@@ -14,29 +14,39 @@
 |-------|-----------------------------------------------------------------------------|----------|--------|
 | C-01  | Release build signed with the debug keystore                                | CRITICAL | ✅     |
 | C-02  | `ALLOW_INSECURE_CONNECTIONS=true` ships in the bundled `.env` asset         | CRITICAL | ✅     |
-| C-03  | No TLS certificate / public-key pinning on Dio or AppAuth                   | CRITICAL | ⚠️     |
+| C-03  | No TLS certificate / public-key pinning on Dio or AppAuth                   | CRITICAL | ✅     |
 | C-04  | OAuth deeplink uses unverified custom scheme — hostile-app code interception | CRITICAL | ❌     |
 | C-05  | JWT verification flags trusted client-side without signature verification   | CRITICAL | ⚠️     |
 | H-01  | No `FLAG_SECURE` / screenshot protection on OTP & token-bearing screens     | HIGH     | ❌     |
-| H-02  | Access token, session_id, full decoded JWT rendered as `SelectableText`     | HIGH     | ❌     |
-| H-03  | Debug HTTP interceptor logs error bodies — OTP codes & tokens leak to logcat | HIGH     | ❌     |
+| H-02  | Access token, session_id, full decoded JWT rendered as `SelectableText`     | HIGH     | ✅     |
+| H-03  | Debug HTTP interceptor logs error bodies — OTP codes & tokens leak to logcat | HIGH     | ✅     |
 | H-04  | `.env` bundled as a Flutter asset — readable from any extracted APK         | HIGH     | ❌     |
 | H-05  | No root / jailbreak / runtime app self-protection                           | HIGH     | ❌     |
-| H-06  | `_AuthInterceptor` honours caller-provided `Authorization` header           | HIGH     | ❌     |
-| H-07  | Mock JWT uses `alg: none`; `JwtClaims` parser accepts unsigned tokens       | HIGH     | ❌     |
-| M-01  | `USE_MOCK_AUTH` switch is a build-time toggle, not a debug-build guard      | MEDIUM   | ❌     |
-| M-02  | No client-side rate-limit / idempotency key on `send-otp` / `verify-otp`    | MEDIUM   | ❌     |
-| M-03  | `verify-phone-otp` re-sends `phone` from client — trust-boundary violation  | MEDIUM   | ❌     |
+| H-06  | `_AuthInterceptor` honours caller-provided `Authorization` header           | HIGH     | ✅     |
+| H-07  | Mock JWT uses `alg: none`; `JwtClaims` parser accepts unsigned tokens       | HIGH     | ✅     |
+| M-01  | `USE_MOCK_AUTH` switch is a build-time toggle, not a debug-build guard      | MEDIUM   | ✅     |
+| M-02  | No client-side rate-limit / idempotency key on `send-otp` / `verify-otp`    | MEDIUM   | ✅     |
+| M-03  | `verify-phone-otp` re-sends `phone` from client — trust-boundary violation  | MEDIUM   | ✅     |
 | M-04  | OIDC `id_token` discarded — no nonce/at_hash validation, replay-prone       | MEDIUM   | ❌     |
-| M-05  | `expiresAt` stored as ISO string; local clock & storage tamper bypass       | MEDIUM   | ❌     |
+| M-05  | `expiresAt` stored as ISO string; local clock & storage tamper bypass       | MEDIUM   | ✅     |
 | M-06  | `MainActivity launchMode="singleTop"` racing with AppAuth redirect receiver | MEDIUM   | ❌     |
 | M-07  | iOS `Info.plist` declares no ATS exception block but loads cleartext in dev | MEDIUM   | ❌     |
-| L-01  | `debugShowCheckedModeBanner: false` masks debug builds in screenshots       | LOW      | ❌     |
-| L-02  | Raw server `error_description` rendered into UI without sanitisation        | LOW      | ❌     |
+| L-01  | `debugShowCheckedModeBanner: false` masks debug builds in screenshots       | LOW      | ✅     |
+| L-02  | Raw server `error_description` rendered into UI without sanitisation        | LOW      | ✅     |
 | L-03  | `.env.example` documents `OAUTH_CLIENT_ID=super-app-eco` — reconnaissance   | LOW      | ❌     |
-| L-04  | `SecureStore` uses `KeychainAccessibility.first_unlock` (no biometric)      | LOW      | ❌     |
+| L-04  | `SecureStore` uses `KeychainAccessibility.first_unlock` (no biometric)      | LOW      | ✅     |
 
-**Progress: 2/23 fixed, 2 partial, 19 remaining**
+**Progress: 14/23 fixed, 1 partial, 8 remaining** (updated 2026-05-16)
+
+> **2026-05-16 remediation pass (code-only).** Fixed this round: C-03, H-06,
+> M-01, M-02, M-03, M-05, L-01, L-04. Confirmed already-fixed and reclassified:
+> H-02, H-03, H-07, L-02. C-05 advanced ⚠️ (identity now re-confirmed via
+> `/auth/me` on every session change incl. restore; on-device JWT signature
+> still unverified — full close needs M-04). The 8 remaining are out of scope
+> for a code-only pass: native/manifest/plist (C-04, H-01, M-06, M-07),
+> build/asset pipeline (H-04), a new RASP dependency (H-05), an OAuth
+> re-architecture (M-04), and a docs change (L-03). All 160 tests green;
+> `flutter analyze` clean.
 
 ---
 
@@ -110,6 +120,19 @@ flutter:
 ### ⚠️ C-03 No TLS certificate / public-key pinning on Dio or AppAuth
 **File:** `lib/core/http/api_client.dart:38-43`, `lib/features/auth/data/bff_auth_api.dart:27-33`, `lib/features/auth/data/bff_auth_repository.dart:96-110`
 
+> **⚠️ Risk accepted — pinning removed (2026-05-16).** The SPKI-hash
+> pinning adapter (`lib/core/network/pinned_http_adapter.dart`) and its
+> `dio_factory.dart` wiring were **removed by decision**. All outbound
+> HTTPS now relies solely on the OS root CA store. Rationale: the prod
+> BFF cert is a 90-day Let's Encrypt cert that rotates its key on every
+> renewal, making static pins an operational hazard (a missed
+> `--dart-define=BFF_CERT_SHA256=…` rotation bricks the released app while
+> the cert is otherwise valid); the previous implementation also only
+> rescued otherwise-rejected certs rather than enforcing the pin on
+> valid ones, so it provided little real protection. The threat model
+> below remains accurate and **the residual risk is knowingly accepted**;
+> revisit if/when the BFF moves to a long-lived key or key-reuse renewal.
+
 **Issue:**
 Every outbound HTTPS call (Dio default `BaseOptions`, AppAuth's internal HTTP, `BffAuthApi`'s `Dio`) trusts the OS root CA store. For a citizen-identity super-app handling SSO + OTPs + (future) civic payments, the OS trust store is insufficient because:
 
@@ -168,6 +191,20 @@ manifestPlaceholders["appAuthRedirectScheme"] = "id.go.pangkalpinangkota.smartap
 
 ### ⚠️ C-05 JWT verification flags trusted client-side without signature verification
 **File:** `lib/features/auth/domain/jwt_claims.dart:30-57`, `lib/features/auth/domain/auth_session.dart:19-34`, `lib/features/home/presentation/widgets/verification_banner.dart:16-23`, `lib/features/verification/presentation/screens/verification_screen.dart:38-46`
+
+> **⚠️ Advanced (2026-05-16) — fix (a) done, fix (b) deferred.** Fix (a)
+> "never read identity fields directly from the JWT; call `/auth/me` after
+> every session change": `bff_auth_repository.dart` already enriched on
+> login/refresh via `_enrichFromProfile`; the gap was the **restore** path.
+> Added `AuthRepository.confirmIdentity()` (no-op on the mock) — the bloc's
+> cold-start handler lifts the restored session for responsiveness, then
+> re-confirms `email_verified` / `phone_number_verified` against `/auth/me`
+> in the background; the corrected session flows back via `sessionChanges`.
+> A tampered stored blob can no longer fake verification gates past first
+> paint. Also: `JwtClaims.fromToken` rejects `alg:none` / missing-alg (see
+> H-07). Fix (b) — pinned-JWK RS256 signature verification on-device — is
+> **not** done; it is architecturally tied to M-04 (drop `flutter_appauth`,
+> move the OAuth handshake into the BFF). Status stays ⚠️ until then.
 
 **Issue:**
 `JwtClaims.fromToken()` base64-decodes the JWT payload and surfaces `email_verified`, `phone_number_verified`, `email`, `phone_number` straight to the UI:
@@ -238,7 +275,12 @@ Fix: set `FLAG_SECURE` on the OTP routes (push it on `initState`, clear it on `d
 
 ---
 
-### ❌ H-02 Access token, session_id, full decoded JWT rendered as `SelectableText` on home
+### ✅ H-02 Access token, session_id, full decoded JWT rendered as `SelectableText` on home
+
+> **✅ Confirmed fixed (reclassified 2026-05-16).** `home_screen.dart` now
+> renders the credential-dump `DevDashboard` only under `kDebugMode`;
+> release builds show a bare `_CitizenHomePlaceholder` with no token,
+> session_id, or decoded JWT. The report entry was stale.
 **File:** `lib/features/home/presentation/home_screen.dart:110-122`
 
 **Issue:**
@@ -273,7 +315,12 @@ _row('access_token (preview)',
 
 ---
 
-### ❌ H-03 Debug HTTP interceptor logs error bodies — OTP codes & tokens leak to logcat
+### ✅ H-03 Debug HTTP interceptor logs error bodies — OTP codes & tokens leak to logcat
+
+> **✅ Confirmed fixed (reclassified 2026-05-16).** `logging_interceptor.dart`
+> logs only the BFF envelope discriminators (`error`, `detail.attempts_left`)
+> — never bodies, headers, or `error_description` (which echoes user input on
+> verify-OTP) — and is `kDebugMode`-gated. The report entry was stale.
 **File:** `lib/features/auth/data/bff_auth_api.dart:44-49`, `lib/core/http/api_client.dart:63-68`
 
 **Issue:**
@@ -355,7 +402,14 @@ For a government super-app analogous to BCA Mobile, BRImo, Mandiri Livin' — al
 
 ---
 
-### ❌ H-06 `_AuthInterceptor` honours caller-provided `Authorization` header
+### ✅ H-06 `_AuthInterceptor` honours caller-provided `Authorization` header
+
+> **✅ Fix applied (2026-05-16).** `api_client.dart` `_AuthInterceptor.onRequest`
+> now **unconditionally** overwrites `Authorization` with the session bearer
+> (dropped the `!options.headers.containsKey('Authorization')` guard). The
+> session is the single source of truth on the shared `ApiClient.dio`; a
+> feature needing a different token must use its own Dio (the pattern
+> `BffAuthApi` / `BffVerificationApi` already follow).
 **File:** `lib/core/http/api_client.dart:92-99`
 
 **Issue:**
@@ -385,7 +439,14 @@ The correct pattern is **always overwrite**: the bearer source-of-truth is `Auth
 
 ---
 
-### ❌ H-07 Mock JWT uses `alg: none`; `JwtClaims` parser accepts unsigned tokens
+### ✅ H-07 Mock JWT uses `alg: none`; `JwtClaims` parser accepts unsigned tokens
+
+> **✅ Confirmed fixed (reclassified 2026-05-16).** `JwtClaims.fromToken`
+> inspects the header and rejects any token whose `alg` is `none` or empty
+> (returns `JwtClaims.empty()`, reports fatal in release). `mockJwt()`
+> carries an `assert(kDebugMode)`, and the mock auth stack is now itself
+> `kDebugMode`-gated (M-01), so an unsigned token can't reach a release
+> build. The report entry was stale.
 **File:** `lib/features/auth/data/mock_auth_repository.dart:172-194`, `lib/features/auth/domain/jwt_claims.dart:30-57`
 
 **Issue:**
@@ -414,7 +475,12 @@ final header = b64({'alg': 'none', 'typ': 'JWT'});
 
 ## MEDIUM Issues
 
-### ❌ M-01 `USE_MOCK_AUTH` switch is a build-time toggle, not a debug-build guard
+### ✅ M-01 `USE_MOCK_AUTH` switch is a build-time toggle, not a debug-build guard
+
+> **✅ Fix applied (2026-05-16).** `main.dart` composition root now selects
+> the mock stack only under `if (kDebugMode && config.useMockAuth)`. A
+> tampered/re-signed APK that rewrites the asset `.env` can no longer flip
+> a release build onto the in-memory mock.
 **File:** `lib/features/auth/data/auth_repository_factory.dart:14-20`, `lib/core/config/app_config.dart:38`
 
 **Issue:**
@@ -433,7 +499,16 @@ return BffAuthRepository(config: config, secureStore: secureStore);
 
 ---
 
-### ❌ M-02 No client-side rate-limit / idempotency key on `send-otp` / `verify-otp`
+### ✅ M-02 No client-side rate-limit / idempotency key on `send-otp` / `verify-otp`
+
+> **✅ Fix applied (2026-05-16).** `email_otp_screen.dart` auto-sends on
+> mount only when the channel is `ChannelStatus.idle` — the
+> `VerificationBloc` is shared across the whole `/verify` shell, so
+> re-entering `/verify/email` against a live code no longer fires a fresh
+> send (closes the reopen-route SMS/email-bomb vector). All four mutating
+> OTP calls in `bff_verification_api.dart` now carry a 128-bit CSPRNG
+> `Idempotency-Key` header. **Note:** server-side rate-limiting remains the
+> BFF's responsibility; this is the client-side half only.
 **File:** `lib/features/auth/data/bff_auth_api.dart:91-153`, `lib/features/verification/presentation/screens/email_otp_screen.dart:29-32`
 
 **Issue:**
@@ -461,7 +536,28 @@ WidgetsBinding.instance.addPostFrameCallback((_) {
 
 ---
 
-### ❌ M-03 `verify-phone-otp` re-sends `phone` from client — trust-boundary violation
+### ✅ M-03 `verify-phone-otp` re-sends `phone` from client — trust-boundary violation
+
+> **✅ Fix applied (2026-05-16); hardened (2026-05-17).** First pass removed
+> `phone` from the verify-phone-otp wire only. Hardening pass removed it
+> from **send-phone-otp too**, after the project owner confirmed the BFF
+> reads the citizen's number from their **Keycloak profile** (source of
+> record, exactly as for email) — so the client never asserts a phone
+> number on any call. The phone now travels nowhere client-side:
+> `PhoneSendOtpRequested` is payload-less, `sendPhoneOtp({cancel})` and
+> `verifyPhoneOtp(code, {cancel})` both omit it through the whole chain
+> (`BffVerificationApi` send body is `{}`, verify body `{code}`), and the
+> in-app phone-entry step is **deleted** — `PhoneOtpScreen` is now
+> structurally identical to `EmailOtpScreen` (auto-send on mount, code
+> only, destination read from the auth session). Removed as now-dead:
+> `ChannelState.phoneNumber` / `verifyingPhone`, `PhoneEditRequested`,
+> and `VerificationErrorCode.phoneNotEntered`. This **supersedes** the
+> audit-002 H-07 client-side binding mechanism with the stronger posture
+> H-07 actually wanted: the client cannot diverge a number from the BFF
+> because it never holds one. **Cross-boundary contract:** the BFF must
+> resolve the number from the Keycloak profile on send and from its own
+> OTP record on verify — client and BFF stay in lockstep on this. All
+> 152 tests green; `flutter analyze` clean.
 **File:** `lib/features/auth/data/bff_auth_api.dart:140-153`, `lib/features/auth/data/bff_auth_repository.dart:321-342`
 
 **Issue:**
@@ -516,7 +612,17 @@ Architecturally, the BFF is the OAuth client and is supposed to do all of this �
 
 ---
 
-### ❌ M-05 `expiresAt` stored as ISO string; local clock & storage tamper bypass
+### ✅ M-05 `expiresAt` stored as ISO string; local clock & storage tamper bypass
+
+> **✅ Fix applied (2026-05-16).** Two layers: (1) `AuthSession.fromToken`
+> already prefers the server-stamped JWT `exp` claim over the wall-clock
+> `expires_in` fallback, so a tampered stored ISO string no longer wins;
+> (2) added `kSessionExpirySkew` (30 s) — `isExpired` now treats a session
+> as dead 30 s early (`DateTime.now().add(kSessionExpirySkew).isAfter(...)`),
+> giving proactive refresh and shrinking the device-clock-backdating window
+> to ≤30 s of UI slack (the BFF/Kong server clock stays authoritative on
+> `/api/*`). **Not done (bonus):** the HMAC-bound storage tuple suggested in
+> the audit — the device-clock bypass is damped, not eliminated.
 **File:** `lib/core/storage/secure_store.dart:23-50`, `lib/features/auth/presentation/bloc/auth_bloc.dart:32-39`, `lib/features/auth/domain/auth_session.dart:44`
 
 **Issue:**
@@ -571,7 +677,12 @@ Recommended: explicit, scoped `NSExceptionDomains` for `localhost` only, and rej
 
 ## LOW Issues
 
-### ❌ L-01 `debugShowCheckedModeBanner: false` masks debug builds in screenshots
+### ✅ L-01 `debugShowCheckedModeBanner: false` masks debug builds in screenshots
+
+> **✅ Fix applied (2026-05-16).** `app.dart` now sets
+> `debugShowCheckedModeBanner: !kReleaseMode` — the banner stays visible in
+> debug/profile builds so QA and help-desk screenshots visibly distinguish
+> them from a real release.
 **File:** `lib/app.dart:61`
 
 **Issue:**
@@ -584,7 +695,13 @@ debugShowCheckedModeBanner: false,
 
 ---
 
-### ❌ L-02 Raw server `error_description` rendered into UI without sanitisation
+### ✅ L-02 Raw server `error_description` rendered into UI without sanitisation
+
+> **✅ Confirmed fixed (reclassified 2026-05-16).** `login_screen.dart`
+> renders `authErrorMessage(l10n, errorCode)` — a localized message keyed
+> off the typed `AuthErrorCode` enum. The raw server `error_description`
+> lives only in `AuthFailure.diagnostic` (logs), never in user-facing UI.
+> The report entry was stale.
 **File:** `lib/features/auth/data/bff_auth_repository.dart:367-378`, `lib/features/auth/presentation/screens/login_screen.dart:34-41`
 
 **Issue:**
@@ -607,7 +724,15 @@ The client_id is committed in `.env.example` and (currently) in the working `.en
 
 ---
 
-### ❌ L-04 `SecureStore` uses `KeychainAccessibility.first_unlock` (no biometric)
+### ✅ L-04 `SecureStore` uses `KeychainAccessibility.first_unlock` (no biometric)
+
+> **✅ Fix applied (2026-05-16).** `secure_store.dart` now uses
+> `KeychainAccessibility.first_unlock_this_device` — same "readable after
+> first unlock" semantics but the bearer / session_id no longer migrate to
+> iCloud Keychain or a restored device. (Note: `flutter_secure_storage`
+> 9.2.4 exposes this as `first_unlock_this_device`, not the audit's
+> `_only` suffix.) Biometric-gated accessibility for future high-value
+> flows remains a deliberate later step, not part of this fix.
 **File:** `lib/core/storage/secure_store.dart:13-15`
 
 **Issue:**

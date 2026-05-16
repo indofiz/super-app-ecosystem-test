@@ -4,7 +4,10 @@
       "PowerShell(flutter analyze lib/core/router/app_router.dart lib/features/verification)",
       "PowerShell(flutter test test/features/verification/)",
       "Bash(ls -la \"d:\\\\DISKOMINFO\\\\super-app-ecosystem-test\\\\\")",
-      "Read(//d/DISKOMINFO/**)"
+      "Read(//d/DISKOMINFO/**)",
+      "Bash(grep -n 'name: dio' -A1 pubspec.lock; ls ~/AppData/Local/Pub/Cache/hosted/pub.dev/ | grep '^dio-')",
+      "Read(//c/Users/WHOIS/AppData/Local/Pub/Cache/hosted/pub.dev/**)",
+      "Bash(awk '/name: dio$/{f=1} f&&/version:/{print;exit}' pubspec.lock)"
     ]
   }
 }

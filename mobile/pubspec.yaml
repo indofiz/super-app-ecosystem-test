@@ -21,6 +21,11 @@ dependencies:
 
   # Networking
   dio: ^5.7.0
+  # Debug-only pretty HTTP logging. Attached behind kDebugMode +
+  # HTTP_VERBOSE_LOG and only ever fed redacted request/response clones
+  # (see pretty_logging_interceptor.dart). Regular dep, not dev_dep:
+  # the gate is at attach-time so it tree-shakes from release builds.
+  pretty_dio_logger: ^1.4.0
 
   # Routing
   go_router: ^14.6.1

@@ -155,44 +155,42 @@ void main() {
     );
   });
 
-  group('phone channel', () {
+  group('phone channel (mirrors email — audit-003 M-03)', () {
     blocTest<VerificationBloc, VerificationState>(
-      'send: caches phoneNumber + transitions to awaitingCode',
+      'send: sending → awaitingCode (no phone on the wire)',
       build: () {
-        when(() => repo.sendPhoneOtp(any(), cancel: any(named: 'cancel')))
+        when(() => repo.sendPhoneOtp(cancel: any(named: 'cancel')))
             .thenAnswer((_) async => const Duration(seconds: 300));
         return VerificationBloc(verificationRepository: repo);
       },
-      act: (bloc) =>
-          bloc.add(const PhoneSendOtpRequested('+6281234567890')),
-      verify: (bloc) {
-        expect(bloc.state.phone.status, ChannelStatus.awaitingCode);
-        expect(bloc.state.phone.phoneNumber, '+6281234567890');
-        expect(bloc.state.phone.expiresAt, isNotNull);
-      },
+      act: (bloc) => bloc.add(const PhoneSendOtpRequested()),
+      expect: () => [
+        isA<VerificationState>().having(
+          (s) => s.phone.status,
+          'phone.status',
+          ChannelStatus.sending,
+        ),
+        isA<VerificationState>()
+            .having(
+              (s) => s.phone.status,
+              'phone.status',
+              ChannelStatus.awaitingCode,
+            )
+            .having((s) => s.phone.expiresAt, 'phone.expiresAt', isNotNull),
+      ],
     );
 
     blocTest<VerificationBloc, VerificationState>(
-      'verify uses the cached phoneNumber from the previous send',
+      'verify happy path → verified, repo called with code only',
       build: () {
-        when(() => repo.sendPhoneOtp(any(), cancel: any(named: 'cancel')))
-            .thenAnswer((_) async => const Duration(seconds: 300));
-        when(() => repo.verifyPhoneOtp(
-              any(),
-              any(),
-              cancel: any(named: 'cancel'),
-            )).thenAnswer((_) async => _session());
+        when(() => repo.verifyPhoneOtp(any(), cancel: any(named: 'cancel')))
+            .thenAnswer((_) async => _session());
         return VerificationBloc(verificationRepository: repo);
       },
-      act: (bloc) async {
-        bloc.add(const PhoneSendOtpRequested('+6281234567890'));
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const PhoneVerifyOtpRequested('123456'));
-      },
+      act: (bloc) => bloc.add(const PhoneVerifyOtpRequested('123456')),
       verify: (bloc) {
         expect(bloc.state.phone.status, ChannelStatus.verified);
         verify(() => repo.verifyPhoneOtp(
-              '+6281234567890',
               '123456',
               cancel: any(named: 'cancel'),
             )).called(1);
@@ -200,19 +198,20 @@ void main() {
     );
 
     blocTest<VerificationBloc, VerificationState>(
-      'verify without a prior send → phoneNotEntered code, no repo call',
-      build: () => VerificationBloc(verificationRepository: repo),
+      'verify with no prior send still reaches the repo (no client guard)',
+      // audit-003 M-03: the phone never lives client-side, so there is
+      // no "did a send happen" gate — structurally identical to email.
+      build: () {
+        when(() => repo.verifyPhoneOtp(any(), cancel: any(named: 'cancel')))
+            .thenAnswer((_) async => _session());
+        return VerificationBloc(verificationRepository: repo);
+      },
       act: (bloc) => bloc.add(const PhoneVerifyOtpRequested('123456')),
       verify: (bloc) {
-        expect(
-          bloc.state.phone.errorCode,
-          VerificationErrorCode.phoneNotEntered,
-        );
-        verifyNever(() => repo.verifyPhoneOtp(
-              any(),
-              any(),
+        verify(() => repo.verifyPhoneOtp(
+              '123456',
               cancel: any(named: 'cancel'),
-            ));
+            )).called(1);
       },
     );
   });
@@ -234,178 +233,6 @@ void main() {
     );
   });
 
-  group('verifyingPhone binding (audit-002 H-07)', () {
-    blocTest<VerificationBloc, VerificationState>(
-      'send-success sets verifyingPhone to the sent number',
-      build: () {
-        when(() => repo.sendPhoneOtp(any(), cancel: any(named: 'cancel')))
-            .thenAnswer((_) async => const Duration(seconds: 300));
-        return VerificationBloc(verificationRepository: repo);
-      },
-      act: (bloc) =>
-          bloc.add(const PhoneSendOtpRequested('+6281234567890')),
-      verify: (bloc) {
-        expect(bloc.state.phone.verifyingPhone, '+6281234567890');
-        expect(bloc.state.phone.phoneNumber, '+6281234567890');
-      },
-    );
-
-    blocTest<VerificationBloc, VerificationState>(
-      'verify uses verifyingPhone even when phoneNumber has diverged',
-      // Simulate a (hypothetical) UI-side mutation of pendingPhone after
-      // a send: the user typed a new number but did NOT resend, so the
-      // BFF's OTP record is still bound to the original.
-      build: () {
-        when(() => repo.verifyPhoneOtp(
-              any(),
-              any(),
-              cancel: any(named: 'cancel'),
-            )).thenAnswer((_) async => _session());
-        return VerificationBloc(verificationRepository: repo);
-      },
-      seed: () => const VerificationState(
-        phone: ChannelState(
-          status: ChannelStatus.awaitingCode,
-          phoneNumber: '+6289999999999', // user retyped
-          verifyingPhone: '+6281234567890', // BFF still bound to this
-        ),
-      ),
-      act: (bloc) => bloc.add(const PhoneVerifyOtpRequested('123456')),
-      verify: (bloc) {
-        expect(bloc.state.phone.status, ChannelStatus.verified);
-        // Repo MUST be called with the BFF-bound number, not the
-        // most-recent UI value.
-        verify(() => repo.verifyPhoneOtp(
-              '+6281234567890',
-              '123456',
-              cancel: any(named: 'cancel'),
-            )).called(1);
-      },
-    );
-
-    blocTest<VerificationBloc, VerificationState>(
-      'sending a second time rebinds verifyingPhone',
-      build: () {
-        when(() => repo.sendPhoneOtp(any(), cancel: any(named: 'cancel')))
-            .thenAnswer((_) async => const Duration(seconds: 300));
-        return VerificationBloc(verificationRepository: repo);
-      },
-      act: (bloc) async {
-        bloc.add(const PhoneSendOtpRequested('+6281111111111'));
-        await Future<void>.delayed(Duration.zero);
-        bloc.add(const PhoneSendOtpRequested('+6282222222222'));
-        await Future<void>.delayed(Duration.zero);
-      },
-      verify: (bloc) {
-        expect(bloc.state.phone.verifyingPhone, '+6282222222222');
-      },
-    );
-
-    blocTest<VerificationBloc, VerificationState>(
-      'verify success clears verifyingPhone',
-      build: () {
-        when(() => repo.verifyPhoneOtp(
-              any(),
-              any(),
-              cancel: any(named: 'cancel'),
-            )).thenAnswer((_) async => _session());
-        return VerificationBloc(verificationRepository: repo);
-      },
-      seed: () => const VerificationState(
-        phone: ChannelState(
-          status: ChannelStatus.awaitingCode,
-          phoneNumber: '+6281234567890',
-          verifyingPhone: '+6281234567890',
-        ),
-      ),
-      act: (bloc) => bloc.add(const PhoneVerifyOtpRequested('123456')),
-      verify: (bloc) {
-        expect(bloc.state.phone.status, ChannelStatus.verified);
-        expect(bloc.state.phone.verifyingPhone, isNull);
-      },
-    );
-
-    blocTest<VerificationBloc, VerificationState>(
-      'otpExpired clears verifyingPhone (BFF record is gone)',
-      build: () {
-        when(() => repo.verifyPhoneOtp(
-              any(),
-              any(),
-              cancel: any(named: 'cancel'),
-            )).thenThrow(
-          VerificationFailure(code: VerificationErrorCode.otpExpired),
-        );
-        return VerificationBloc(verificationRepository: repo);
-      },
-      seed: () => const VerificationState(
-        phone: ChannelState(
-          status: ChannelStatus.awaitingCode,
-          phoneNumber: '+6281234567890',
-          verifyingPhone: '+6281234567890',
-        ),
-      ),
-      act: (bloc) => bloc.add(const PhoneVerifyOtpRequested('000000')),
-      verify: (bloc) {
-        expect(bloc.state.phone.status, ChannelStatus.idle);
-        expect(bloc.state.phone.verifyingPhone, isNull);
-      },
-    );
-
-    blocTest<VerificationBloc, VerificationState>(
-      'otpInvalid with attempts remaining KEEPS verifyingPhone',
-      build: () {
-        when(() => repo.verifyPhoneOtp(
-              any(),
-              any(),
-              cancel: any(named: 'cancel'),
-            )).thenThrow(
-          VerificationFailure(
-            code: VerificationErrorCode.otpInvalid,
-            attemptsLeft: 2,
-            retryable: true,
-          ),
-        );
-        return VerificationBloc(verificationRepository: repo);
-      },
-      seed: () => const VerificationState(
-        phone: ChannelState(
-          status: ChannelStatus.awaitingCode,
-          phoneNumber: '+6281234567890',
-          verifyingPhone: '+6281234567890',
-        ),
-      ),
-      act: (bloc) => bloc.add(const PhoneVerifyOtpRequested('000000')),
-      verify: (bloc) {
-        expect(bloc.state.phone.status, ChannelStatus.awaitingCode);
-        // BFF still holds the OTP record — user can retype.
-        expect(bloc.state.phone.verifyingPhone, '+6281234567890');
-      },
-    );
-
-    blocTest<VerificationBloc, VerificationState>(
-      'verify without verifyingPhone → phoneNotEntered, no repo call',
-      // Even if phoneNumber is set (e.g. from a prior failed send that
-      // never reached awaitingCode), without a verifyingPhone the
-      // bloc must not call the repo.
-      build: () => VerificationBloc(verificationRepository: repo),
-      seed: () => const VerificationState(
-        phone: ChannelState(phoneNumber: '+6281234567890'),
-      ),
-      act: (bloc) => bloc.add(const PhoneVerifyOtpRequested('123456')),
-      verify: (bloc) {
-        expect(
-          bloc.state.phone.errorCode,
-          VerificationErrorCode.phoneNotEntered,
-        );
-        verifyNever(() => repo.verifyPhoneOtp(
-              any(),
-              any(),
-              cancel: any(named: 'cancel'),
-            ));
-      },
-    );
-  });
-
   group('cancellation (audit-002 H-02)', () {
     test('close() cancels in-flight email + phone tokens', () async {
       // Capture the CancelTokens the bloc hands to the repo so we can
@@ -421,7 +248,7 @@ void main() {
         capturedEmail = inv.namedArguments[#cancel] as CancelToken?;
         return emailCompleter.future;
       });
-      when(() => repo.sendPhoneOtp(any(), cancel: any(named: 'cancel')))
+      when(() => repo.sendPhoneOtp(cancel: any(named: 'cancel')))
           .thenAnswer((inv) {
         capturedPhone = inv.namedArguments[#cancel] as CancelToken?;
         return phoneCompleter.future;
@@ -429,7 +256,7 @@ void main() {
 
       final bloc = VerificationBloc(verificationRepository: repo);
       bloc.add(const EmailSendOtpRequested());
-      bloc.add(const PhoneSendOtpRequested('+6281234567890'));
+      bloc.add(const PhoneSendOtpRequested());
       await Future<void>.delayed(Duration.zero);
 
       // The bloc handed live tokens to both channels.

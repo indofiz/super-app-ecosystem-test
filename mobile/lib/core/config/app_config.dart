@@ -32,6 +32,11 @@ class AppConfigException implements Exception {
 ///    as a readable asset.
 /// 5. Releasing with `USE_MOCK_AUTH=true` would silently auth every
 ///    user as `mock-user-####`. Ship `false` in production builds.
+/// 6. `HTTP_VERBOSE_LOG=true` turns on the redacted pretty Dio logger
+///    (boxed request/response output). It is force-disabled in release
+///    regardless of `.env`, and even in debug only ever sees redacted
+///    clones of the request/response (see `pretty_logging_interceptor`).
+///    Keep it `false` by default — it is opt-in per developer.
 class AppConfig {
   const AppConfig({
     required this.bffBaseUrl,
@@ -40,6 +45,7 @@ class AppConfig {
     required this.oauthScopes,
     required this.useMockAuth,
     required this.allowInsecureConnections,
+    required this.httpVerboseLog,
   });
 
   final String bffBaseUrl;
@@ -48,6 +54,11 @@ class AppConfig {
   final List<String> oauthScopes;
   final bool useMockAuth;
   final bool allowInsecureConnections;
+
+  /// Debug-only: enables the redacted pretty HTTP logger. Always `false`
+  /// in release builds (the `kReleaseMode` branch in [fromEnv] is a
+  /// compile-time constant, so the logger tree-shakes out entirely).
+  final bool httpVerboseLog;
 
   factory AppConfig.fromEnv() {
     bool readBool(String key, {required bool fallback}) {
@@ -66,6 +77,11 @@ class AppConfig {
     final allowInsecure = kReleaseMode
         ? false
         : readBool('ALLOW_INSECURE_CONNECTIONS', fallback: false);
+    // Same dead-code pattern as `allowInsecure`: kReleaseMode is a
+    // compile-time constant so the pretty logger never ships in release.
+    final httpVerboseLog = kReleaseMode
+        ? false
+        : readBool('HTTP_VERBOSE_LOG', fallback: false);
 
     if (!useMockAuth) {
       if (bffBaseUrl.isEmpty) {
@@ -104,6 +120,7 @@ class AppConfig {
           .toList(),
       useMockAuth: useMockAuth,
       allowInsecureConnections: allowInsecure,
+      httpVerboseLog: httpVerboseLog,
     );
   }
 

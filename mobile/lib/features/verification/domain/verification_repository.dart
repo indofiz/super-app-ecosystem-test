@@ -30,17 +30,22 @@ abstract class VerificationRepository {
   Future<AuthSession> verifyEmailOtp(String code, {CancelToken? cancel});
 
   /// Asks the BFF to send a WA OTP via Fonnte (`POST /auth/phone/send-otp`).
-  /// The [phone] number is bound to the outstanding OTP record server-side
-  /// — [verifyPhoneOtp] must use the same number.
-  Future<Duration> sendPhoneOtp(String phone, {CancelToken? cancel});
+  ///
+  /// audit-003 M-03: no phone number is sent. The BFF resolves the
+  /// citizen's number from their Keycloak profile (the IdP is the source
+  /// of record, exactly as for email) and binds it to the OTP record
+  /// server-side. The client never asserts a phone number — not on send,
+  /// not on verify — which closes the cross-number vector entirely
+  /// instead of relying on a BFF re-check.
+  Future<Duration> sendPhoneOtp({CancelToken? cancel});
 
   /// Submits the user-entered code (`POST /auth/phone/verify-otp`).
   /// On success: same persistence contract as [verifyEmailOtp].
-  Future<AuthSession> verifyPhoneOtp(
-    String phone,
-    String code, {
-    CancelToken? cancel,
-  });
+  ///
+  /// audit-003 M-03: the phone number is intentionally NOT a parameter,
+  /// symmetric with [sendPhoneOtp]. The BFF looks the bound number up
+  /// from its own OTP record (itself seeded from the Keycloak profile).
+  Future<AuthSession> verifyPhoneOtp(String code, {CancelToken? cancel});
 
   /// Releases owned resources (HTTP client, internal controllers).
   Future<void> dispose();

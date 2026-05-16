@@ -148,6 +148,7 @@ class BffAuthRepository implements AuthRepository {
       // Replace JWT-decoded flags with BFF-confirmed values from /auth/me.
       final enriched = await _enrichFromProfile(session);
       if (enriched != session) await _local.write(enriched);
+      stopwatch.stop();
       _log('login: SUCCESS in ${stopwatch.elapsedMilliseconds}ms');
       _controller.add(enriched);
       return enriched;
@@ -393,6 +394,22 @@ class BffAuthRepository implements AuthRepository {
   Future<void> replaceSession(AuthSession session) async {
     await _local.write(session);
     _controller.add(session);
+  }
+
+  @override
+  Future<void> confirmIdentity() async {
+    // audit-003 C-05: restoreSession() trusts the on-device JWT's
+    // verified flags. Re-confirm against /auth/me so a tampered stored
+    // blob can't fake verification UI gates. Best-effort — reuses the
+    // same enrichment path as login/refresh; failure leaves the
+    // JWT-decoded flags as a degraded fallback.
+    final stored = await _local.read();
+    if (stored == null) return;
+    final enriched = await _enrichFromProfile(stored);
+    if (enriched != stored) {
+      await _local.write(enriched);
+      _controller.add(enriched);
+    }
   }
 
   /// Best-effort enrichment: calls `/auth/me` to replace JWT-decoded identity

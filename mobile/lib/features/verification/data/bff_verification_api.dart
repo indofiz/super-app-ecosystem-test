@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 
 import '../../../core/config/app_config.dart';
@@ -6,6 +9,7 @@ import '../../../core/network/cancelled_exception.dart';
 import '../../../core/network/dio_factory.dart'
     show createDio, kHttpReceiveTimeoutSlow;
 import '../../../core/network/logging_interceptor.dart';
+import '../../../core/network/pretty_logging_interceptor.dart';
 import '../../../core/network/retry_interceptor.dart';
 import '../../auth/data/dto/send_otp_response_dto.dart';
 import '../../auth/data/dto/verify_otp_response_dto.dart';
@@ -26,8 +30,8 @@ import '../../auth/data/dto/verify_otp_response_dto.dart';
 /// Endpoints (routed through nginx at config.bffBaseUrl):
 ///   POST /auth/email/send-otp     hdr: bearer  body: {}              → 202 / 200
 ///   POST /auth/email/verify-otp   hdr: bearer  body: {code}          → 200 {access_token,…}
-///   POST /auth/phone/send-otp     hdr: bearer  body: {phone}         → 202 / 200
-///   POST /auth/phone/verify-otp   hdr: bearer  body: {phone,code}    → 200 {access_token,…}
+///   POST /auth/phone/send-otp     hdr: bearer  body: {}              → 202 / 200
+///   POST /auth/phone/verify-otp   hdr: bearer  body: {code}          → 200 {access_token,…}
 ///
 /// Like [BffAuthApi], deliberately does NOT use `ApiClient` (whose
 /// refresh-on-401 loop would recurse if a verify ever 401s mid-session
@@ -47,13 +51,26 @@ class BffVerificationApi {
     _dio.interceptors.add(
       httpLoggingInterceptor('verify', logBffErrorEnvelope: true),
     );
+    final pretty = prettyHttpLoggingInterceptor(config);
+    if (pretty != null) _dio.interceptors.add(pretty);
   }
 
   final AppConfig config;
   final Dio _dio;
+  final Random _rng = Random.secure();
 
   Future<void> dispose() async {
     _dio.close(force: true);
+  }
+
+  /// audit-003 M-02: a fresh per-call idempotency key so the BFF can
+  /// collapse a duplicate submit (user double-tap, app foregrounded
+  /// mid-flight, a future retry layer) into a single side effect — one
+  /// SMS/email dispatched, one OTP attempt consumed. 128 bits of CSPRNG
+  /// entropy, URL-safe, unpadded.
+  String _idempotencyKey() {
+    final bytes = List<int>.generate(16, (_) => _rng.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
   }
 
   /// POST /auth/email/send-otp — 202 with `{delivery, expires_in}`, or
@@ -73,7 +90,10 @@ class BffVerificationApi {
           '/auth/email/send-otp',
           data: const <String, dynamic>{},
           options: Options(
-            headers: {'Authorization': 'Bearer $bearer'},
+            headers: {
+              'Authorization': 'Bearer $bearer',
+              'Idempotency-Key': _idempotencyKey(),
+            },
             extra: const {RetryInterceptor.kNoRetryExtra: true},
             // audit-004 M-03: SMTP delivery can take >15 s under load.
             receiveTimeout: kHttpReceiveTimeoutSlow,
@@ -102,7 +122,10 @@ class BffVerificationApi {
           '/auth/email/verify-otp',
           data: {'code': code},
           options: Options(
-            headers: {'Authorization': 'Bearer $bearer'},
+            headers: {
+              'Authorization': 'Bearer $bearer',
+              'Idempotency-Key': _idempotencyKey(),
+            },
             extra: const {RetryInterceptor.kNoRetryExtra: true},
           ),
           cancelToken: cancel,
@@ -115,19 +138,25 @@ class BffVerificationApi {
   /// POST /auth/phone/send-otp — 202 with `{delivery, expires_in}`, or
   /// 200 with `{verified: true}` if the phone is already verified.
   ///
+  /// audit-003 M-03: empty body. The BFF resolves the citizen's number
+  /// from their Keycloak profile (source of record, same as email) — the
+  /// client never puts a phone number on the wire.
+  ///
   /// Tagged `noRetry` for the same reason as [sendEmailOtp]: Fonnte
   /// dispatches a WhatsApp message as a side effect.
   Future<SendOtpResponseDto> sendPhoneOtp(
-    String bearer,
-    String phone, {
+    String bearer, {
     CancelToken? cancel,
   }) =>
       withCancelTranslation(() async {
         final res = await _dio.post<Map<String, dynamic>>(
           '/auth/phone/send-otp',
-          data: {'phone': phone},
+          data: const <String, dynamic>{},
           options: Options(
-            headers: {'Authorization': 'Bearer $bearer'},
+            headers: {
+              'Authorization': 'Bearer $bearer',
+              'Idempotency-Key': _idempotencyKey(),
+            },
             extra: const {RetryInterceptor.kNoRetryExtra: true},
             // audit-004 M-03: Fonnte's p99 exceeds 20 s during carrier
             // saturation. A 15 s cap surfaces a delivered OTP as failure.
@@ -144,18 +173,25 @@ class BffVerificationApi {
   /// POST /auth/phone/verify-otp — 200 with a fresh session on success.
   ///
   /// Tagged `noRetry` for the same reason as [verifyEmailOtp].
+  ///
+  /// audit-003 M-03: body is `{code}` only. The phone number is bound to
+  /// the server-side OTP record at send-otp time; re-sending it here would
+  /// make the BFF responsible for re-checking the binding and opened a
+  /// cross-number verification vector if that check ever weakened.
   Future<VerifyOtpResponseDto> verifyPhoneOtp(
     String bearer,
-    String phone,
     String code, {
     CancelToken? cancel,
   }) =>
       withCancelTranslation(() async {
         final res = await _dio.post<Map<String, dynamic>>(
           '/auth/phone/verify-otp',
-          data: {'phone': phone, 'code': code},
+          data: {'code': code},
           options: Options(
-            headers: {'Authorization': 'Bearer $bearer'},
+            headers: {
+              'Authorization': 'Bearer $bearer',
+              'Idempotency-Key': _idempotencyKey(),
+            },
             extra: const {RetryInterceptor.kNoRetryExtra: true},
           ),
           cancelToken: cancel,

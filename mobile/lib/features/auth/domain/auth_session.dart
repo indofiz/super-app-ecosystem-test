@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 
+import '../../../core/config/auth_timings.dart';
 import '../../../core/storage/stored_session.dart';
 import 'jwt_claims.dart';
 
@@ -65,7 +66,13 @@ class AuthSession extends Equatable {
   final String? phoneNumber;
   final bool phoneNumberVerified;
 
-  bool get isExpired => DateTime.now().isAfter(expiresAt);
+  /// audit-003 M-05: expire [kSessionExpirySkew] early so the bloc
+  /// refreshes before the bearer dies mid-request, and so a backdated
+  /// device clock can't keep a stale session "valid" right up to the
+  /// wire. The JWT `exp` claim (preferred for [expiresAt] in
+  /// [fromToken]) remains the authoritative, tamper-resistant input.
+  bool get isExpired =>
+      DateTime.now().add(kSessionExpirySkew).isAfter(expiresAt);
   bool get fullyVerified => emailVerified && phoneNumberVerified;
 
   AuthSession copyWith({
